@@ -1,36 +1,47 @@
 import 'package:flutter/cupertino.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'login.dart'; // make sure this file exists
+import 'signup.dart'; // make sure this file exists
 
 Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized(); // Ensure bindings initialized
   await Supabase.initialize(
     url: 'https://joerjjtiwctzdbcynnar.supabase.co',
     anonKey: 'sb_publishable_78ZUvr1qtfV9aq0qErtIuA_nABUte5B',
   );
-  runApp(MyApp());
+  runApp(const MyApp());
 }
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
+  
   @override
   Widget build(BuildContext context) {
     return CupertinoApp(
       title: 'ConnectAAC',
-      theme: CupertinoThemeData(
+      theme: const CupertinoThemeData(
         primaryColor: Color.fromARGB(255, 238, 233, 224),
       ),
-      home: MyHomePage(),
+      initialRoute: '/login',
+      routes: {
+        '/': (context) => const LoginPage(),
+        '/login': (context) => const LoginPage(),
+        '/signup': (context) => const SignupPage(),
+        '/home': (context) => const MyHomePage(),
+      },
     );
   }
 }
 
 class MyHomePage extends StatelessWidget {
   const MyHomePage({super.key});
+
   @override
   Widget build(BuildContext context) {
     return CupertinoPageScaffold(
       navigationBar: CupertinoNavigationBar(
-        leading: Padding(
-          padding: const EdgeInsets.only(left: 8.0),
+        leading: const Padding(
+          padding: EdgeInsets.only(left: 8.0),
           child: Text(
             'ConnectAAC',
             style: TextStyle(
@@ -45,42 +56,40 @@ class MyHomePage extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Settings button
               CupertinoButton(
                 padding: EdgeInsets.zero,
                 onPressed: () {
-                  // TODO: Implement settings action
+                  // TODO: Implement settings
                 },
                 child: Container(
-                  decoration: BoxDecoration(
+                  decoration: const BoxDecoration(
                     shape: BoxShape.circle,
                     color: Color.fromARGB(255, 153, 160, 113),
                   ),
-                  padding: EdgeInsets.all(8),
-                  child: Icon(CupertinoIcons.settings, size: 24, color: CupertinoColors.white),
+                  padding: const EdgeInsets.all(8),
+                  child: const Icon(CupertinoIcons.settings, size: 24, color: CupertinoColors.white),
                 ),
               ),
-              SizedBox(width: 8),
-              // AI Optimization button
+              const SizedBox(width: 8),
               CupertinoButton(
                 padding: EdgeInsets.zero,
                 onPressed: () {
-                  // TODO: Implement AI optimization action
+                  // TODO: Implement AI action
                 },
                 child: Container(
-                  decoration: BoxDecoration(
+                  decoration: const BoxDecoration(
                     shape: BoxShape.circle,
                     color: Color.fromARGB(255, 153, 160, 113),
                   ),
-                  padding: EdgeInsets.all(8),
-                  child: Icon(CupertinoIcons.sparkles, size: 24, color: CupertinoColors.white),
+                  padding: const EdgeInsets.all(8),
+                  child: const Icon(CupertinoIcons.sparkles, size: 24, color: CupertinoColors.white),
                 ),
               ),
             ],
           ),
         ),
       ),
-      child: Center(
+      child: const Center(
         child: Text('Welcome to ConnectAAC!'),
       ),
     );

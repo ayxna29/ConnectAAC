@@ -6,6 +6,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter/services.dart';
 
 class SignupPage extends StatefulWidget {
+  const SignupPage({super.key});
+
   @override
   _SignupPageState createState() => _SignupPageState();
 }
@@ -68,14 +70,14 @@ class _SignupPageState extends State<SignupPage> {
         password: passwordController.text,
       );
 
-      final userId = authResponse.user?.id;
-      if (userId == null) throw Exception('User not created');
+      final user = authResponse.user;
+      if (user == null) throw Exception('User not created');
 
       await supabase.from('users').insert({
-        'id': userId,
+        'id': user.id,
         'name': nameController.text.trim(),
         'role': selectedRole,
-        'caregiver_code': selectedRole == 'Parent/Guardian'
+        'caregiver_pin': selectedRole == 'Parent/Guardian'
             ? caregiverCodeController.text.trim()
             : null,
       });
@@ -162,11 +164,20 @@ class _SignupPageState extends State<SignupPage> {
                   ],
                 ),
               const SizedBox(height: 20),
-              CupertinoButton.filled(
+              CupertinoButton(
+                color: const Color(0xFF90CAF9),
                 onPressed: isLoading ? null : signUp,
                 child: isLoading
                     ? CupertinoActivityIndicator()
                     : const Text('Create Account'),
+              ),
+              const SizedBox(height: 16),
+              CupertinoButton(
+                color: const Color(0xFF90CAF9),
+                onPressed: () {
+                  Navigator.of(context).pushNamed('/login');
+                },
+                child: const Text("Already have an account? Log In"),
               ),
             ],
           ),
