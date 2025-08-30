@@ -36,9 +36,9 @@ class _LoginPageState extends State<LoginPage> {
               child: const Text("Continue"),
               onPressed: () {
                 Navigator.of(context).pop();
-                // Navigate to home/dashboard screen here
+                Navigator.of(context).pushReplacementNamed('/home');
               },
-            )
+            ),
           ],
         ),
       );
@@ -52,7 +52,7 @@ class _LoginPageState extends State<LoginPage> {
             CupertinoDialogAction(
               child: const Text("OK"),
               onPressed: () => Navigator.of(context).pop(),
-            )
+            ),
           ],
         ),
       );
@@ -64,9 +64,7 @@ class _LoginPageState extends State<LoginPage> {
   @override
   Widget build(BuildContext context) {
     return CupertinoPageScaffold(
-      navigationBar: const CupertinoNavigationBar(
-        middle: Text('Log In'),
-      ),
+      navigationBar: const CupertinoNavigationBar(middle: Text('Log In')),
       child: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(20),

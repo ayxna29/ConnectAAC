@@ -38,24 +38,28 @@ class _SignupPageState extends State<SignupPage> {
       builder: (_) => Container(
         height: 250,
         color: CupertinoColors.systemBackground.resolveFrom(context),
-        child: Column(
-          children: [
-            SizedBox(
-              height: 200,
-              child: CupertinoPicker(
-                scrollController: FixedExtentScrollController(initialItem: selectedRoleIndex),
-                itemExtent: 32,
-                onSelectedItemChanged: (index) {
-                  setState(() => selectedRoleIndex = index);
-                },
-                children: roles.map((r) => Text(r)).toList(),
+        child: SafeArea(
+          top: false,
+          child: Column(
+            children: [
+              Expanded(
+                child: CupertinoPicker(
+                  scrollController: FixedExtentScrollController(
+                    initialItem: selectedRoleIndex,
+                  ),
+                  itemExtent: 32,
+                  onSelectedItemChanged: (index) {
+                    setState(() => selectedRoleIndex = index);
+                  },
+                  children: roles.map((r) => Text(r)).toList(),
+                ),
               ),
-            ),
-            CupertinoButton(
-              child: const Text('Done'),
-              onPressed: () => Navigator.of(context).pop(),
-            )
-          ],
+              CupertinoButton(
+                child: const Text('Done'),
+                onPressed: () => Navigator.of(context).pop(),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -91,7 +95,7 @@ class _SignupPageState extends State<SignupPage> {
             CupertinoDialogAction(
               child: const Text("OK"),
               onPressed: () => Navigator.of(context).pop(),
-            )
+            ),
           ],
         ),
       );
@@ -105,7 +109,7 @@ class _SignupPageState extends State<SignupPage> {
             CupertinoDialogAction(
               child: const Text("OK"),
               onPressed: () => Navigator.of(context).pop(),
-            )
+            ),
           ],
         ),
       );
@@ -117,9 +121,7 @@ class _SignupPageState extends State<SignupPage> {
   @override
   Widget build(BuildContext context) {
     return CupertinoPageScaffold(
-      navigationBar: const CupertinoNavigationBar(
-        middle: Text('Sign Up'),
-      ),
+      navigationBar: const CupertinoNavigationBar(middle: Text('Sign Up')),
       child: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(20),
