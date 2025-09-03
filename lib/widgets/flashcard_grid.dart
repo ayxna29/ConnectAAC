@@ -1,27 +1,24 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:string_similarity/string_similarity.dart';
 import 'package:flutter/services.dart';
 
-/// FlashcardGrid shows a grid of flashcards for a test word list.
-/// Each card shows the matched SVG (if any) and the word label.
-/// Tapping a card calls the onCardTap callback (word string).
 class FlashcardGrid extends StatelessWidget {
-  const FlashcardGrid({super.key, this.words, this.onCardTap});
+  const FlashcardGrid({
+    super.key,
+    this.words,
+    this.onCardTap,
+    this.favorites,
+    this.onToggleFavorite,
+    this.tags,
+  });
 
-  // callback invoked when a card is tapped
+  final List<String>? words;
   final ValueChanged<String>? onCardTap;
+  final ValueChanged<String>? onToggleFavorite;
+  final Set<String>? favorites; // set of filenames (e.g. 'dog.svg')
+  final Map<String, List<String>>? tags; // filename -> tags
 
-  // Hardcoded test words for now.
-  static const List<String> _defaultTestWords = [
-    "airplane",
-    "car",
-    "bicycle",
-    "dog",
-  ];
-
-  // Example available filenames in assets/mulberry-symbols/EN-symbols/
   static const List<String> _availableFilenames = [
     "aeroplane.svg",
     "car.svg",
@@ -29,11 +26,7 @@ class FlashcardGrid extends StatelessWidget {
     "dog.svg",
   ];
 
-  final List<String>? words;
   static const double _matchThreshold = 0.5;
-
-  // AssetManifest cache (shared across instances).
-  static Future<Map<String, dynamic>>? _manifestFuture;
 
   String? _findBestMatch(String word) {
     var bestScore = 0.0;
@@ -51,133 +44,32 @@ class FlashcardGrid extends StatelessWidget {
     return null;
   }
 
-  Future<bool> _assetExists(String assetPath) async {
-    try {
-      _manifestFuture ??= rootBundle.loadString('AssetManifest.json').then((s) {
-        final map = json.decode(s) as Map<String, dynamic>;
-        return map;
-      });
-      final manifest = await _manifestFuture!;
-      if (manifest.containsKey(assetPath)) return true;
-      final withoutAssets = assetPath.replaceFirst(RegExp(r'^assets/'), '');
-      if (manifest.containsKey(withoutAssets)) return true;
-      if (!assetPath.startsWith('assets/')) {
-        final withAssets = 'assets/$assetPath';
-        if (manifest.containsKey(withAssets)) return true;
-      }
-      return false;
-    } catch (e) {
-      // ignore: avoid_print
-      print('Failed to read AssetManifest.json: $e');
-      return false;
-    }
-  }
-
-  // Requirement: signature exactly buildFlashcard(String word)
-  Widget buildFlashcard(String word) {
-    final match = _findBestMatch(word);
-    final assetPath = match != null
-        ? 'assets/mulberry-symbols/EN-symbols/$match'
-        : null;
-
-    // Wrap card in GestureDetector so taps are handled and forwarded.
-    return GestureDetector(
-      onTap: () {
-        if (onCardTap != null) onCardTap!(word);
-      },
-      child: Card(
-        elevation: 2,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-          // Column places image above with label near bottom
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const SizedBox(height: 6),
-              // Larger image area for autism-friendly layout
-              Expanded(
-                child: Center(
-                  child: SizedBox(
-                    width: double.infinity,
-                    // let height grow within Expanded
-                    child: assetPath != null
-                        ? FutureBuilder<bool>(
-                            future: _assetExists(assetPath),
-                            builder: (context, snapshot) {
-                              if (snapshot.connectionState ==
-                                  ConnectionState.waiting) {
-                                return const Center(
-                                  child:
-                                      CircularProgressIndicator(strokeWidth: 2),
-                                );
-                              }
-                              final exists = snapshot.data == true;
-                              if (exists) {
-                                return Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                      vertical: 8.0, horizontal: 8.0),
-                                  child: SvgPicture.asset(
-                                    assetPath,
-                                    fit: BoxFit.contain,
-                                  ),
-                                );
-                              }
-                              return Container(
-                                height: 120,
-                                decoration: BoxDecoration(
-                                  color: Colors.grey.shade100,
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: const Center(
-                                  child: Icon(
-                                    Icons.broken_image_outlined,
-                                    size: 56,
-                                    color: Colors.black26,
-                                  ),
-                                ),
-                              );
-                            },
-                          )
-                        : Container(
-                            height: 120,
-                            decoration: BoxDecoration(
-                              color: Colors.grey.shade100,
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: const Center(
-                              child: Icon(
-                                Icons.help_outline,
-                                size: 56,
-                                color: Colors.black26,
-                              ),
-                            ),
-                          ),
-                  ),
-                ),
-              ),
-
-              // Label area pushed towards bottom, larger & bolder
-              const SizedBox(height: 8),
-              Text(
-                word,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 20, // larger label
-                ),
-              ),
-              const SizedBox(height: 8),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
-    final items = words ?? _defaultTestWords;
+    final items = words ?? <String>['airplane', 'car', 'bicycle', 'dog'];
+
+    // Build list of tuples (word, matchedFilename)
+    final mapped = items.map((w) {
+      final match = _findBestMatch(w);
+      return MapEntry(w, match);
+    }).toList();
+
+    // Reorder so favorites appear first (if favorites set provided)
+    List<MapEntry<String, String?>> ordered;
+    if (favorites != null && favorites!.isNotEmpty) {
+      final fav = <MapEntry<String, String?>>[];
+      final other = <MapEntry<String, String?>>[];
+      for (final e in mapped) {
+        if (e.value != null && favorites!.contains(e.value!)) {
+          fav.add(e);
+        } else {
+          other.add(e);
+        }
+      }
+      ordered = [...fav, ...other];
+    } else {
+      ordered = mapped;
+    }
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -190,7 +82,138 @@ class FlashcardGrid extends StatelessWidget {
           crossAxisSpacing: 12,
           mainAxisSpacing: 12,
           childAspectRatio: 1.0,
-          children: items.map((w) => buildFlashcard(w)).toList(),
+          children: ordered.map((entry) {
+            final word = entry.key;
+            final filename = entry.value; // may be null
+            final assetPath = (filename != null)
+                ? 'assets/mulberry-symbols/EN-symbols/$filename'
+                : null;
+            final isFavorite =
+                filename != null &&
+                favorites != null &&
+                favorites!.contains(filename);
+            final fileTags = (filename != null && tags != null)
+                ? tags![filename] ?? []
+                : <String>[];
+
+            return GestureDetector(
+              onTap: () {
+                if (onCardTap != null) onCardTap!(word);
+              },
+              child: Card(
+                elevation: 2,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Stack(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        vertical: 8,
+                        horizontal: 12,
+                      ),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const SizedBox(height: 6),
+                          Expanded(
+                            child: Center(
+                              child: SizedBox(
+                                width: double.infinity,
+                                child: assetPath != null
+                                    ? Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          vertical: 8.0,
+                                          horizontal: 8.0,
+                                        ),
+                                        child: SvgPicture.asset(
+                                          assetPath,
+                                          fit: BoxFit.contain,
+                                        ),
+                                      )
+                                    : Container(
+                                        height: 120,
+                                        decoration: BoxDecoration(
+                                          color: Colors.grey.shade100,
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
+                                        ),
+                                        child: const Center(
+                                          child: Icon(
+                                            Icons.help_outline,
+                                            size: 48,
+                                            color: Colors.black26,
+                                          ),
+                                        ),
+                                      ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            word,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 20,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                        ],
+                      ),
+                    ),
+
+                    // Favorite toggle top-right
+                    Positioned(
+                      right: 6,
+                      top: 6,
+                      child: GestureDetector(
+                        onTap: () {
+                          // toggle favorite for this flashcard (pass filename if available else word)
+                          if (onToggleFavorite != null) {
+                            onToggleFavorite!(filename ?? word);
+                          }
+                        },
+                        child: CircleAvatar(
+                          radius: 18,
+                          backgroundColor: Colors.white70,
+                          child: Icon(
+                            isFavorite ? Icons.star : Icons.star_border,
+                            color: isFavorite ? Colors.amber : Colors.black38,
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    // Small tag indicators bottom-left
+                    if (fileTags.isNotEmpty)
+                      Positioned(
+                        left: 8,
+                        bottom: 8,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            vertical: 4,
+                            horizontal: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withOpacity(0.06),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            fileTags.take(2).map((t) => '#$t').join(' '),
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Colors.black54,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            );
+          }).toList(),
         );
       },
     );

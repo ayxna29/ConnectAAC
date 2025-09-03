@@ -5,6 +5,9 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:string_similarity/string_similarity.dart';
 import '../widgets/flashcard_grid.dart';
+import 'settings.dart'; // added
+import 'optimization.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class SelectedCard {
   final String word;
@@ -26,12 +29,21 @@ class _MyHomePageState extends State<MyHomePage> {
   bool _isListening = false;
   late FlutterTts _tts;
 
+  // TTS settings state
+  Map<String, String>? _currentVoice;
+  double _currentRate = 0.5;
+  double _currentVolume = 1.0;
+
   static const List<String> _availableFilenames = [
     "aeroplane.svg",
     "car.svg",
     "bicycle.svg",
     "dog.svg",
   ];
+
+  // local favorites/tags (keeps UI responsive; persisted in OptimizationPage)
+  final Set<String> _favorites = {};
+  final Map<String, List<String>> _tags = {};
 
   @override
   void initState() {
@@ -44,8 +56,8 @@ class _MyHomePageState extends State<MyHomePage> {
   Future<void> _configureTts() async {
     try {
       await _tts.setLanguage('en-US');
-      await _tts.setSpeechRate(0.5);
-      await _tts.setVolume(1.0);
+      await _tts.setSpeechRate(_currentRate);
+      await _tts.setVolume(_currentVolume);
       await _tts.setPitch(1.0);
       try {
         await _tts.awaitSpeakCompletion(true);
@@ -56,11 +68,97 @@ class _MyHomePageState extends State<MyHomePage> {
     }
   }
 
-  @override
-  void dispose() {
-    caregiverInputController.dispose();
-    _tts.stop();
-    super.dispose();
+  // Open settings and apply returned values (robust, shows error dialog on failure)
+  Future<void> _openSettings() async {
+    try {
+      final result = await Navigator.of(context).push<Map<String, Object?>>(
+        CupertinoPageRoute(
+          builder: (_) => SettingsPage(
+            initialVoice: _currentVoice,
+            initialRate: _currentRate,
+            initialVolume: _currentVolume,
+          ),
+        ),
+      );
+
+      if (result == null) return; // user cancelled
+
+      // validate result entries
+      final voiceRaw = result['voice'];
+      final rateRaw = result['rate'];
+      final volumeRaw = result['volume'];
+
+      Map<String, String>? voice;
+      if (voiceRaw is Map) {
+        // convert keys/values to strings safely
+        voice = voiceRaw.map(
+          (k, v) => MapEntry(k.toString(), v?.toString() ?? ''),
+        );
+      }
+
+      final rate = (rateRaw is double) ? rateRaw : _currentRate;
+      final volume = (volumeRaw is double) ? volumeRaw : _currentVolume;
+
+      setState(() {
+        _currentVoice = voice;
+        _currentRate = rate;
+        _currentVolume = volume;
+      });
+
+      // apply to TTS with safe try/catch
+      try {
+        await _tts.setSpeechRate(_currentRate);
+        await _tts.setVolume(_currentVolume);
+        if (_currentVoice != null) {
+          await _tts.setVoice(_currentVoice!);
+        }
+      } catch (e) {
+        // ignore: avoid_print
+        print('Failed to apply TTS settings: $e');
+        if (mounted) {
+          showCupertinoDialog(
+            context: context,
+            builder: (_) => CupertinoAlertDialog(
+              title: const Text('TTS Error'),
+              content: Text('Failed to apply voice settings: $e'),
+              actions: [
+                CupertinoDialogAction(
+                  child: const Text('OK'),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ],
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      // navigator or other unexpected error
+      // ignore: avoid_print
+      print('Error opening settings: $e');
+      if (mounted) {
+        showCupertinoDialog(
+          context: context,
+          builder: (_) => CupertinoAlertDialog(
+            title: const Text('Error'),
+            content: Text('Could not open settings: $e'),
+            actions: [
+              CupertinoDialogAction(
+                child: const Text('OK'),
+                onPressed: () => Navigator.of(context).pop(),
+              ),
+            ],
+          ),
+        );
+      }
+    }
+  }
+
+  // Placeholder: open AI optimization screen or perform action
+  void _openAiOptimization() {
+    // Navigate to the OptimizationPage so user can manage tags & favorites
+    Navigator.of(
+      context,
+    ).push(CupertinoPageRoute(builder: (_) => const OptimizationPage()));
   }
 
   String? _findBestFilename(String word) {
@@ -139,7 +237,15 @@ class _MyHomePageState extends State<MyHomePage> {
   Future<void> _speakNow(String text) async {
     try {
       await _tts.stop();
-      await Future.delayed(const Duration(milliseconds: 20));
+      // small stabilization delay to avoid missed starts
+      await Future.delayed(const Duration(milliseconds: 10));
+      await _tts.setSpeechRate(_currentRate);
+      await _tts.setVolume(_currentVolume);
+      if (_currentVoice != null) {
+        try {
+          await _tts.setVoice(_currentVoice!);
+        } catch (_) {}
+      }
       await _tts.speak(text);
     } catch (e) {
       // ignore: avoid_print
@@ -162,6 +268,90 @@ class _MyHomePageState extends State<MyHomePage> {
     });
     // speak immediately, non-blocking UI
     _speakNow(word);
+  }
+
+  // toggle favorite from grid
+  void _onToggleFavorite(String idOrFilename) {
+    // grid passes filename if available else the word
+    String? filename = idOrFilename;
+    if (!filename.endsWith('.svg')) {
+      // try to map word -> filename
+      final mapped = _findBestFilename(filename);
+      filename = mapped;
+    }
+    if (filename == null) return;
+    final nonNullFilename = filename;
+    // optimistic local update
+    setState(() {
+      if (_favorites.contains(nonNullFilename))
+        _favorites.remove(nonNullFilename);
+      else
+        _favorites.add(nonNullFilename);
+    });
+
+    // persist to Supabase
+    _persistFavorite(nonNullFilename, _favorites.contains(nonNullFilename));
+  }
+
+  Future<void> _persistFavorite(String filename, bool add) async {
+    try {
+      final supabase = Supabase.instance.client;
+      final user = supabase.auth.currentUser;
+      if (user == null) {
+        // show sign-in required dialog
+        showCupertinoDialog(
+          context: context,
+          builder: (_) => CupertinoAlertDialog(
+            title: const Text('Sign in required'),
+            content: const Text('Please sign in to save favorites.'),
+            actions: [
+              CupertinoDialogAction(
+                child: const Text('OK'),
+                onPressed: () => Navigator.of(context).pop(),
+              ),
+            ],
+          ),
+        );
+        return;
+      }
+
+      // Persist favorites using your schema (flashcard_id, user_id).
+      // Add -> insert a row; Remove -> delete row for flashcard_id + user_id.
+      final table = supabase.from('favorites');
+      if (add) {
+        await table.insert({'flashcard_id': filename, 'user_id': user.id});
+      } else {
+        await table
+            .delete()
+            .eq('flashcard_id', filename)
+            .eq('user_id', user.id);
+      }
+      // no special error field expected; just rely on exception on failure
+    } catch (e) {
+      // revert local change on error
+      setState(() {
+        if (_favorites.contains(filename))
+          _favorites.remove(filename);
+        else
+          _favorites.add(filename);
+      });
+      // show a simple alert
+      if (mounted) {
+        showCupertinoDialog(
+          context: context,
+          builder: (_) => CupertinoAlertDialog(
+            title: const Text('Error'),
+            content: Text('Failed to save favorite: $e'),
+            actions: [
+              CupertinoDialogAction(
+                child: const Text('OK'),
+                onPressed: () => Navigator.of(context).pop(),
+              ),
+            ],
+          ),
+        );
+      }
+    }
   }
 
   // backspace: remove last
@@ -239,6 +429,45 @@ class _MyHomePageState extends State<MyHomePage> {
               color: CupertinoColors.black,
             ),
           ),
+        ),
+        // settings + AI optimization buttons (AI to the right)
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CupertinoButton(
+              padding: EdgeInsets.zero,
+              onPressed: _openSettings,
+              child: Container(
+                decoration: const BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Color.fromARGB(255, 153, 160, 113),
+                ),
+                padding: const EdgeInsets.all(8),
+                child: const Icon(
+                  CupertinoIcons.settings,
+                  size: 24,
+                  color: CupertinoColors.white,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            CupertinoButton(
+              padding: EdgeInsets.zero,
+              onPressed: _openAiOptimization,
+              child: Container(
+                decoration: const BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Color.fromARGB(255, 153, 160, 113),
+                ),
+                padding: const EdgeInsets.all(8),
+                child: const Icon(
+                  CupertinoIcons.sparkles,
+                  size: 24,
+                  color: CupertinoColors.white,
+                ),
+              ),
+            ),
+          ],
         ),
       ),
       child: SafeArea(
@@ -346,7 +575,12 @@ class _MyHomePageState extends State<MyHomePage> {
                   horizontal: 8.0,
                   vertical: 8,
                 ),
-                child: FlashcardGrid(onCardTap: _onFlashcardTap),
+                child: FlashcardGrid(
+                  onCardTap: _onFlashcardTap,
+                  onToggleFavorite: _onToggleFavorite,
+                  favorites: _favorites,
+                  tags: _tags,
+                ),
               ),
             ),
           ],
