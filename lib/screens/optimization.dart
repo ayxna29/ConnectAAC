@@ -1,9 +1,8 @@
 import 'dart:convert';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../services/ai_service.dart';
 
 class OptimizationPage extends StatefulWidget {
   const OptimizationPage({super.key});
@@ -14,503 +13,574 @@ class OptimizationPage extends StatefulWidget {
 
 class _OptimizationPageState extends State<OptimizationPage> {
   final supabase = Supabase.instance.client;
-  String? _userId;
-  bool _loading = true;
 
-  static const List<String> _allFilenames = [
-    'aeroplane.svg',
-    'car.svg',
-    'bicycle.svg',
-    'dog.svg',
-  ];
+  bool _loading = false;
 
-  Set<String> favorites = {};
-  Map<String, List<String>> flashcardTags = {};
-  List<String> globalTags = ['food', 'places', 'feelings', 'animals'];
-  String filterTag = '';
-  // per-tag example words (e.g. #food -> ['sandwich'])
-  final Map<String, List<String>> tagExamples = {};
-  // favorite words (UI only, stored in-memory)
-  final List<String> favoriteWords = [];
+  // generation input controller and selected tag for AI
+  final TextEditingController _generationController = TextEditingController();
+  String? _selectedTag;
 
+  // favorites UI
+  final TextEditingController _favController = TextEditingController();
+  final List<String> _favoriteWords =
+      []; // UI-only list of chips (keeps in sync with DB when you wire it)
+
+  // tags
   final TextEditingController _newTagController = TextEditingController();
-  final TextEditingController _favWordController = TextEditingController();
-  final Map<String, TextEditingController> _perTagAddControllers = {};
-  final Set<String> _assetKeys = <String>{};
+  final List<String> _tags =
+      []; // loaded from DB (fallback defaults added in _init)
+  final Map<String, TextEditingController> _perTagControllers = {};
+
+  // flashcards (text -> image url)
+  final Map<String, String> _imageForText = {};
+  // new: words grouped by tag for quick UI rendering
+  final Map<String, List<String>> _wordsByTag = {};
 
   @override
   void initState() {
     super.initState();
-    _loadAssetManifest();
     _initData();
   }
 
   @override
   void dispose() {
+    _favController.dispose();
     _newTagController.dispose();
-    _favWordController.dispose();
-    for (final c in _perTagAddControllers.values) {
+    _generationController.dispose();
+    for (final c in _perTagControllers.values) {
       c.dispose();
     }
     super.dispose();
   }
 
-  Future<void> _loadAssetManifest() async {
-    try {
-      final manifest = await rootBundle.loadString('AssetManifest.json');
-      final Map<String, dynamic> map =
-          json.decode(manifest) as Map<String, dynamic>;
-      _assetKeys.addAll(map.keys);
-      if (mounted) setState(() {});
-    } catch (e) {
-      // ignore: avoid_print
-      print('Could not load AssetManifest.json: $e');
-    }
-  }
-
   Future<void> _initData() async {
     setState(() => _loading = true);
     try {
-      final user = supabase.auth.currentUser;
-      if (user == null) {
-        setState(() {
-          _userId = null;
-          _loading = false;
-        });
-        return;
-      }
-      _userId = user.id;
-
-      // load favorites (expect rows with flashcard_id)
-      try {
-        final favRes = await supabase
-            .from('favorites')
-            .select('flashcard_id')
-            .eq('user_id', _userId!);
-        final rows = favRes as List<dynamic>;
-        favorites = rows
-            .map(
-              (r) => (r as Map).containsKey('flashcard_id')
-                  ? r['flashcard_id'].toString()
-                  : '',
-            )
-            .where((s) => s.isNotEmpty)
-            .toSet();
-      } catch (e) {
-        // ignore: avoid_print
-        print('Favorites load error: $e');
-      }
-
-      // load flashcard tags
-      try {
-        final fcRes = await supabase.from('flashcards').select('filename,tags');
-        final rows = fcRes as List<dynamic>;
-        final Map<String, List<String>> loaded = {};
-        for (final r in rows) {
-          if (r is Map) {
-            final filename = r['filename']?.toString();
-            final tagsRaw = r['tags'];
-            final tags = (tagsRaw is List)
-                ? tagsRaw.map((t) => t.toString()).toList()
-                : <String>[];
-            if (filename != null && _allFilenames.contains(filename)) {
-              loaded[filename] = tags;
-              for (final t in tags) {
-                if (!globalTags.contains(t)) globalTags.add(t);
-              }
-            }
-          }
-        }
-        flashcardTags = loaded;
-      } catch (e) {
-        // ignore: avoid_print
-        print('Flashcards load error: $e');
-      }
-
-      // load tag examples if you have a table, otherwise keep in-memory (left as-is)
+      await _loadTags();
+      await _loadFlashcards();
+      await _loadFavorites();
     } catch (e) {
-      // ignore: avoid_print
-      print('Supabase init error: $e');
+      // ignore for UI demo
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
 
-  // Persist favorite: insert row (flashcard_id, user_id) to mark favorite.
-  // Remove favorite: delete row for flashcard_id + user_id.
-  Future<void> _toggleFavorite(String flashcardId) async {
-    final user = supabase.auth.currentUser;
-    if (user == null) {
-      _showSignInRequired();
+  Future<void> _loadTags() async {
+    try {
+      final res = await supabase
+          .from('tags')
+          .select('name')
+          .order('created_at', ascending: true);
+      final rows = res as List<dynamic>? ?? [];
+      _tags
+        ..clear()
+        ..addAll(
+          rows
+              .whereType<Map>()
+              .map((r) => r['name']?.toString() ?? '')
+              .where((s) => s.isNotEmpty),
+        );
+      if (_tags.isEmpty) {
+        _tags.addAll([
+          'food',
+          'transportation',
+          'animals',
+          'places',
+          'feelings',
+        ]);
+      }
+      setState(() {});
+    } catch (e) {
+      // leave defaults
+      if (_tags.isEmpty) {
+        _tags.addAll([
+          'food',
+          'transportation',
+          'animals',
+          'places',
+          'feelings',
+        ]);
+      }
+    }
+  }
+
+  Future<void> _loadFlashcards() async {
+    try {
+      final res = await supabase
+          .from('flashcards')
+          .select('text,image_url,tag');
+      final rows = res as List<dynamic>? ?? [];
+      _imageForText.clear();
+      _wordsByTag.clear();
+      for (final r in rows.whereType<Map>()) {
+        final t = (r['text'] ?? '').toString();
+        final img = (r['image_url'] ?? '').toString();
+        final tag = (r['tag'] ?? '').toString();
+        if (t.isNotEmpty && img.isNotEmpty) _imageForText[t] = img;
+        if (t.isNotEmpty) {
+          final list = _wordsByTag.putIfAbsent(
+            tag.isEmpty ? '__untagged' : tag,
+            () => <String>[],
+          );
+          if (!list.contains(t)) list.add(t);
+        }
+      }
+      setState(() {});
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  Future<void> _loadFavorites() async {
+    try {
+      final user = supabase.auth.currentUser;
+      if (user == null) return;
+      final res = await supabase.from('favorites').select('flashcard_id');
+      final rows = res as List<dynamic>? ?? [];
+      final ids = rows
+          .whereType<Map>()
+          .map((r) => r['flashcard_id']?.toString() ?? '')
+          .where((s) => s.isNotEmpty)
+          .toList();
+      if (ids.isNotEmpty) {
+        final quoted = ids
+            .map((s) => "'${s.replaceAll("'", "\\'")}'")
+            .join(',');
+        final fcRes = await supabase
+            .from('flashcards')
+            .select('text')
+            .filter('id', 'in', '($quoted)');
+        final fr = fcRes as List<dynamic>? ?? [];
+        _favoriteWords
+          ..clear()
+          ..addAll(
+            fr
+                .whereType<Map>()
+                .map((r) => r['text']?.toString() ?? '')
+                .where((s) => s.isNotEmpty),
+          );
+      }
+      setState(() {});
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  // UI actions (these call DB where appropriate)
+  Future<void> _addFavoriteWord() async {
+    final word = _favController.text.trim();
+    if (word.isEmpty) return;
+    // local UI update
+    if (!_favoriteWords.contains(word)) _favoriteWords.add(word);
+    _favController.clear();
+    setState(() {});
+
+    // optional: if you want to persist a favorite mapping create/find flashcard and insert into favorites table
+    // left out here — wire to your server / favorite logic if desired
+  }
+
+  Future<void> _createTag() async {
+    final name = _newTagController.text.trim();
+    if (name.isEmpty) return;
+    if (_tags.contains(name)) {
+      _newTagController.clear();
       return;
     }
-
-    final wasFav = favorites.contains(flashcardId);
-
-    // optimistic UI
-    setState(() {
-      if (wasFav)
-        favorites.remove(flashcardId);
-      else
-        favorites.add(flashcardId);
-    });
+    setState(() => _loading = true);
     try {
-      if (wasFav) {
-        await supabase
-            .from('favorites')
-            .delete()
-            .eq('flashcard_id', flashcardId)
-            .eq('user_id', user.id);
-      } else {
-        await supabase.from('favorites').insert({
-          'flashcard_id': flashcardId,
-          'user_id': user.id,
-        });
-      }
-    } catch (e) {
-      // revert
-      setState(() {
-        if (wasFav)
-          favorites.add(flashcardId);
-        else
-          favorites.remove(flashcardId);
+      await supabase.from('tags').insert({
+        'name': name,
+        'user_id': supabase.auth.currentUser?.id,
       });
-      _showError('Failed to toggle favorite: $e');
-    }
-  }
-
-  Future<void> _setTagsForFile(String filename, List<String> tags) async {
-    flashcardTags[filename] = tags;
-    try {
-      await supabase.from('flashcards').upsert({
-        'filename': filename,
-        'tags': tags,
-      });
-      for (final t in tags) {
-        if (!globalTags.contains(t)) globalTags.add(t);
-      }
-      if (mounted) setState(() {});
-    } catch (e) {
-      // ignore: avoid_print
-      print('Set tags error: $e');
-    }
-  }
-
-  void _showSignInRequired() {
-    showCupertinoDialog(
-      context: context,
-      builder: (_) => CupertinoAlertDialog(
-        title: const Text('Sign in required'),
-        content: const Text('Please sign in to save favorites and tags.'),
-        actions: [
-          CupertinoDialogAction(
-            child: const Text('OK'),
-            onPressed: () => Navigator.of(context).pop(),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showError(String msg) {
-    if (!mounted) return;
-    showCupertinoDialog(
-      context: context,
-      builder: (_) => CupertinoAlertDialog(
-        title: const Text('Error'),
-        content: Text(msg),
-        actions: [
-          CupertinoDialogAction(
-            child: const Text('OK'),
-            onPressed: () => Navigator.of(context).pop(),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _safeSvg(String path) {
-    try {
-      if (_assetKeys.isNotEmpty && !_assetKeys.contains(path)) {
-        return const Icon(
-          CupertinoIcons.photo,
-          size: 48,
-          color: CupertinoColors.systemGrey,
-        );
-      }
-      return SvgPicture.asset(
-        path,
-        fit: BoxFit.contain,
-        placeholderBuilder: (_) => const CupertinoActivityIndicator(),
-      );
-    } catch (e) {
-      // ignore: avoid_print
-      print('SVG load error for $path: $e');
-      return const Icon(
-        CupertinoIcons.photo,
-        size: 48,
-        color: CupertinoColors.systemGrey,
-      );
-    }
-  }
-
-  // UI helpers for tags & favorite words
-  void _addFavoriteWord() {
-    final v = _favWordController.text.trim();
-    if (v.isEmpty) return;
-    if (!favoriteWords.contains(v)) {
-      setState(() {
-        favoriteWords.add(v);
-        _favWordController.clear();
-      });
-    }
-  }
-
-  void _removeFavoriteWord(String w) {
-    setState(() => favoriteWords.remove(w));
-  }
-
-  void _createTag() {
-    final t = _newTagController.text.trim();
-    if (t.isEmpty) return;
-    if (!globalTags.contains(t)) {
-      setState(() {
-        globalTags.add(t);
-        tagExamples[t] = tagExamples[t] ?? [];
-        _newTagController.clear();
-      });
-    }
-  }
-
-  void _deleteTag(String t) {
-    setState(() {
-      globalTags.remove(t);
-      tagExamples.remove(t);
-      for (final f in _allFilenames) {
-        flashcardTags[f]?.remove(t);
-      }
-    });
-  }
-
-  void _addExampleToTag(String tag) {
-    final controller = _perTagAddControllers.putIfAbsent(
-      tag,
-      () => TextEditingController(),
-    );
-    final v = controller.text.trim();
-    if (v.isEmpty) return;
-    final list = tagExamples[tag] ?? <String>[];
-    if (!list.contains(v)) {
-      list.add(v);
-      tagExamples[tag] = list;
-      controller.clear();
+      _tags.add(name);
+      _newTagController.clear();
       setState(() {});
+    } catch (e) {
+      // show error
+      _showDialog('Error', 'Could not create tag: $e');
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
   }
 
-  Widget _tagCard(String tag) {
-    final controller = _perTagAddControllers.putIfAbsent(
+  Future<void> _addWordToTag(String tag) async {
+    final controller = _perTagControllers.putIfAbsent(
       tag,
       () => TextEditingController(),
     );
-    final examples = tagExamples[tag] ?? [];
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 8),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: CupertinoColors.systemGrey6,
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  '#$tag',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-              ),
-              GestureDetector(
-                onTap: () => _deleteTag(tag),
-                child: const Icon(CupertinoIcons.delete, size: 20),
-              ),
-            ],
+    final name = controller.text.trim();
+    if (name.isEmpty) return;
+    setState(() => _loading = true);
+    try {
+      final user = supabase.auth.currentUser;
+      if (user == null) {
+        _showDialog('Sign in required', 'You must sign in to add flashcards.');
+        return;
+      }
+      // insert new flashcard
+      final insert = await supabase.from('flashcards').insert({
+        'text': name,
+        'tag': tag,
+        'user_id': user.id,
+        'created_at': DateTime.now().toUtc().toIso8601String(),
+      }).select();
+      // update local grouped map for immediate UI feedback
+      final list = _wordsByTag.putIfAbsent(tag, () => <String>[]);
+      if (!list.contains(name)) list.add(name);
+      // try to find an existing image that matches term
+      final image = await _findMatchingImage(name);
+      if (image != null && image.isNotEmpty) {
+        // attempt to save image_url back to the inserted row if DB perms allow
+        try {
+          // get inserted id if available
+          String? id;
+          if (insert.isNotEmpty) {
+            id = insert[0]['id']?.toString();
+          }
+          if (id != null && id.isNotEmpty) {
+            await supabase
+                .from('flashcards')
+                .update({'image_url': image})
+                .eq('id', id);
+          }
+        } catch (_) {
+          // ignore permission issues
+        }
+        _imageForText[name] = image;
+      }
+      controller.clear();
+      _showDialog('Added', '"$name" added to #$tag');
+    } catch (e) {
+      _showDialog('Error', 'Failed to add word: $e');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<String?> _findMatchingImage(String term) async {
+    try {
+      final pattern = '%${term.replaceAll('%', '\\%')}%';
+      // 1) search image_url contains term
+      final r1 = await supabase
+          .from('flashcards')
+          .select('image_url')
+          .ilike('image_url', pattern)
+          .limit(1);
+      final rows1 = r1 as List<dynamic>? ?? [];
+      if (rows1.isNotEmpty && rows1[0] is Map) {
+        final img = (rows1[0]['image_url'] ?? '').toString();
+        if (img.isNotEmpty) return img;
+      }
+      // 2) search for common filename guesses
+      final guesses = [
+        '${term.toLowerCase()}.svg',
+        '${term.toLowerCase()}.png',
+        '${term.toLowerCase()}.jpg',
+      ];
+      for (final g in guesses) {
+        final rg = await supabase
+            .from('flashcards')
+            .select('image_url')
+            .ilike('image_url', '%$g%')
+            .limit(1);
+        final rgr = rg as List<dynamic>? ?? [];
+        if (rgr.isNotEmpty && rgr[0] is Map) {
+          final img = (rgr[0]['image_url'] ?? '').toString();
+          if (img.isNotEmpty) return img;
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+    return null;
+  }
+
+  Future<void> _deleteTag(String tag) async {
+    final ok = await showCupertinoDialog<bool>(
+      context: context,
+      builder: (_) => CupertinoAlertDialog(
+        title: const Text('Delete tag'),
+        content: Text('Delete category "#$tag"? Flashcards will remain.'),
+        actions: [
+          CupertinoDialogAction(
+            child: const Text('Cancel'),
+            onPressed: () => Navigator.of(context).pop(false),
           ),
-          const SizedBox(height: 8),
-          SizedBox(
-            height: 36,
-            child: Row(
-              children: [
-                Expanded(
-                  child: CupertinoTextField(
-                    controller: controller,
-                    placeholder: 'Add word to #$tag',
-                  ),
-                ),
-                const SizedBox(width: 8),
-                CupertinoButton(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 6,
-                  ),
-                  child: const Text('+'),
-                  onPressed: () => _addExampleToTag(tag),
-                ),
-              ],
+          CupertinoDialogAction(
+            child: const Text(
+              'Delete',
+              style: TextStyle(color: CupertinoColors.systemRed),
             ),
-          ),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 6,
-            children: examples.map((e) {
-              return Container(
-                padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
-                decoration: BoxDecoration(
-                  color: CupertinoColors.systemGrey5,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(e),
-                    const SizedBox(width: 8),
-                    GestureDetector(
-                      onTap: () {
-                        setState(() {
-                          examples.remove(e);
-                          tagExamples[tag] = List<String>.from(examples);
-                        });
-                      },
-                      child: const Icon(CupertinoIcons.xmark_circle, size: 18),
-                    ),
-                  ],
-                ),
-              );
-            }).toList(),
+            onPressed: () => Navigator.of(context).pop(true),
           ),
         ],
       ),
     );
+    if (ok != true) return;
+    try {
+      await supabase.from('tags').delete().eq('name', tag);
+      _tags.remove(tag);
+      setState(() {});
+    } catch (e) {
+      _showDialog('Error', 'Could not delete tag: $e');
+    }
+  }
+
+  void _showDialog(String title, String body) {
+    showCupertinoDialog(
+      context: context,
+      builder: (_) => CupertinoAlertDialog(
+        title: Text(title),
+        content: Text(body),
+        actions: [
+          CupertinoDialogAction(
+            child: const Text('OK'),
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _favoriteSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Favorite Words',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'Add words to always have available in the favorites section.',
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: CupertinoTextField(
+                controller: _favController,
+                placeholder: 'Enter a word',
+                onSubmitted: (_) => _addFavoriteWord(),
+              ),
+            ),
+            const SizedBox(width: 8),
+            CupertinoButton.filled(
+              onPressed: _addFavoriteWord,
+              child: const Text('Add'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          children: _favoriteWords.map((w) {
+            return Chip(
+              label: Text(w),
+              backgroundColor: CupertinoColors.systemGrey5,
+            );
+          }).toList(),
+        ),
+      ],
+    );
+  }
+
+  Widget _tagSystem() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Tag System',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'Create and manage tags to organize vocabulary by categories.',
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: CupertinoTextField(
+                controller: _newTagController,
+                placeholder: 'Create a new tag (e.g. #food)',
+                onSubmitted: (_) => _createTag(),
+              ),
+            ),
+            const SizedBox(width: 8),
+            CupertinoButton.filled(
+              onPressed: _createTag,
+              child: const Text('Create'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Column(
+          children: _tags.map((tag) {
+            final controller = _perTagControllers.putIfAbsent(
+              tag,
+              () => TextEditingController(),
+            );
+            final words = (_wordsByTag[tag] ?? []).toList();
+            return Container(
+              margin: const EdgeInsets.symmetric(vertical: 8),
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: CupertinoColors.systemGrey6,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '#$tag',
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                      GestureDetector(
+                        onTap: () => _deleteTag(tag),
+                        child: const Icon(
+                          Icons.delete_outline,
+                          color: Colors.red,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: CupertinoTextField(
+                          controller: controller,
+                          placeholder: 'Add word to #$tag',
+                          onSubmitted: (_) => _addWordToTag(tag),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        decoration: BoxDecoration(
+                          color: Colors.blue,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: IconButton(
+                          icon: const Icon(Icons.add, color: Colors.white),
+                          onPressed: () => _addWordToTag(tag),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  // display added words under the box
+                  if (words.isNotEmpty)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Wrap(
+                        spacing: 8,
+                        runSpacing: 6,
+                        children: words.map((w) => _wordChip(w)).toList(),
+                      ),
+                    ),
+                ],
+              ),
+            );
+          }).toList(),
+        ),
+        const SizedBox(height: 12),
+        Align(
+          alignment: Alignment.centerRight,
+          child: CupertinoButton.filled(
+            child: const Text('Done'),
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // add this helper inside _OptimizationPageState
+  Widget _wordChip(String w) {
+    final img = _imageForText[w];
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: CupertinoColors.systemGrey5,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (img != null && img.isNotEmpty)
+            Container(
+              width: 24,
+              height: 24,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                image: DecorationImage(
+                  image: NetworkImage(img),
+                  fit: BoxFit.cover,
+                ),
+              ),
+            )
+          else
+            Container(
+              width: 24,
+              height: 24,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.white24,
+              ),
+              child: const Icon(Icons.text_fields, size: 16),
+            ),
+          const SizedBox(width: 8),
+          Text(w),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _onGeneratePressed() async {
+    final prompt = _generationController.text
+        .trim(); // ensure you have a TextEditingController
+    if (prompt.isEmpty) return;
+    setState(() => _loading = true);
+    try {
+      final created = await generateFlashcardsFromAI(prompt, tag: _selectedTag);
+      // Option A: reload from Supabase (recommended) to show saved cards:
+      await _loadFlashcards();
+      // Option B: merge created into local UI state if you manage it locally:
+      // _localFlashcards.insertAll(0, created);
+      _showDialog('Success', 'Created ${created.length} flashcards');
+    } catch (e) {
+      _showDialog('Error', e.toString());
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final Widget body = _loading
-        ? const Center(child: CupertinoActivityIndicator())
-        : SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Favorite Words section
-                const Text(
-                  'Favorite Words',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  'Add words to always have available in the favorites section.',
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: CupertinoTextField(
-                        controller: _favWordController,
-                        placeholder: 'Enter a word',
-                        onSubmitted: (_) => _addFavoriteWord(),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    CupertinoButton.filled(
-                      child: const Text('Add'),
-                      onPressed: _addFavoriteWord,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  children: favoriteWords.map((w) {
-                    return Container(
-                      padding: const EdgeInsets.symmetric(
-                        vertical: 6,
-                        horizontal: 10,
-                      ),
-                      decoration: BoxDecoration(
-                        color: CupertinoColors.systemGrey5,
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(w),
-                          const SizedBox(width: 8),
-                          GestureDetector(
-                            onTap: () => _removeFavoriteWord(w),
-                            child: const Icon(CupertinoIcons.xmark, size: 18),
-                          ),
-                        ],
-                      ),
-                    );
-                  }).toList(),
-                ),
-
-                const SizedBox(height: 20),
-                // Tag System
-                const Text(
-                  'Tag System',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  'Create and manage tags to organize vocabulary by categories.',
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: CupertinoTextField(
-                        controller: _newTagController,
-                        placeholder: 'Create a new tag (e.g. #food)',
-                        onSubmitted: (_) => _createTag(),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    CupertinoButton.filled(
-                      child: const Text('Create'),
-                      onPressed: _createTag,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                // tag list (cards)
-                Column(children: globalTags.map((t) => _tagCard(t)).toList()),
-
-                const SizedBox(height: 20),
-                // Done button
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    CupertinoButton.filled(
-                      child: const Text('Done'),
-                      onPressed: () => Navigator.of(context).pop(),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 40),
-              ],
-            ),
-          );
-
     return CupertinoPageScaffold(
       navigationBar: const CupertinoNavigationBar(
         middle: Text('AI Customization'),
       ),
-      child: SafeArea(child: body),
+      child: SafeArea(
+        child: _loading
+            ? const Center(child: CupertinoActivityIndicator())
+            : SingleChildScrollView(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _favoriteSection(),
+                    const SizedBox(height: 20),
+                    _tagSystem(),
+                  ],
+                ),
+              ),
+      ),
     );
   }
 }

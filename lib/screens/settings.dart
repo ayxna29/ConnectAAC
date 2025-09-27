@@ -65,9 +65,11 @@ class _SettingsPageState extends State<SettingsPage> {
     // Find selected index
     int selectedIndex = _selectedVoice == null
         ? 0
-        : _voices.indexWhere((v) =>
-            v['name'] == _selectedVoice!['name'] &&
-            v['locale'] == _selectedVoice!['locale']);
+        : _voices.indexWhere(
+            (v) =>
+                v['name'] == _selectedVoice!['name'] &&
+                v['locale'] == _selectedVoice!['locale'],
+          );
     selectedIndex = selectedIndex >= 0 ? selectedIndex : 0;
 
     return CupertinoButton(
@@ -97,8 +99,9 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                   Expanded(
                     child: CupertinoPicker(
-                      scrollController:
-                          FixedExtentScrollController(initialItem: selectedIndex),
+                      scrollController: FixedExtentScrollController(
+                        initialItem: selectedIndex,
+                      ),
                       itemExtent: 36,
                       onSelectedItemChanged: (index) {
                         setState(() {
@@ -135,8 +138,9 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   void _onSave() {
-    Navigator.of(context).pop(
-        {'voice': _selectedVoice, 'rate': _rate, 'volume': _volume});
+    Navigator.of(
+      context,
+    ).pop({'voice': _selectedVoice, 'rate': _rate, 'volume': _volume});
   }
 
   @override
@@ -158,17 +162,7 @@ class _SettingsPageState extends State<SettingsPage> {
               const SizedBox(height: 8),
               _voicePickerButton(),
               const SizedBox(height: 20),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text('Speed: ${_rate.toStringAsFixed(2)}'),
-              ),
-              CupertinoSlider(
-                value: _rate,
-                min: 0.2,
-                max: 1.2,
-                divisions: 50,
-                onChanged: (v) => setState(() => _rate = v),
-              ),
+              // Speed control removed per user request
               Align(
                 alignment: Alignment.centerLeft,
                 child: Text('Volume: ${_volume.toStringAsFixed(2)}'),
@@ -206,4 +200,3 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 }
-

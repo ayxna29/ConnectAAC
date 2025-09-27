@@ -283,10 +283,11 @@ class _MyHomePageState extends State<MyHomePage> {
     final nonNullFilename = filename;
     // optimistic local update
     setState(() {
-      if (_favorites.contains(nonNullFilename))
+      if (_favorites.contains(nonNullFilename)) {
         _favorites.remove(nonNullFilename);
-      else
+      } else {
         _favorites.add(nonNullFilename);
+      }
     });
 
     // persist to Supabase
@@ -315,25 +316,101 @@ class _MyHomePageState extends State<MyHomePage> {
         return;
       }
 
-      // Persist favorites using your schema (flashcard_id, user_id).
-      // Add -> insert a row; Remove -> delete row for flashcard_id + user_id.
+      // Persist favorites using your schema (flashcard_id (uuid), user_id).
+      // We store flashcard references by UUID in the favorites table, so
+      // first lookup the flashcard id by filename.
+      // Find the flashcard.id for the given filename. Different DB exports may
+      // store the filename in a different column name, so try a few candidates.
+      final candidateCols = ['filename', 'file', 'name', 'asset', 'path'];
+      String? flashcardId;
+      for (final col in candidateCols) {
+        try {
+          final fcRes = await supabase
+              .from('flashcards')
+              .select('id')
+              .eq(col, filename);
+          final rows = fcRes as List<dynamic>;
+          if (rows.isNotEmpty) {
+            flashcardId = (rows.first as Map)['id']?.toString();
+            if (flashcardId != null && flashcardId.isNotEmpty) break;
+          }
+        } catch (_) {
+          // ignore and try next column name
+        }
+      }
+
+      if (flashcardId == null || flashcardId.isEmpty) {
+        // Try a fallback: fetch all flashcards and try to match by filename value
+        try {
+          final allRes = await supabase.from('flashcards').select('*');
+          final rows = allRes as List<dynamic>;
+          for (final r in rows) {
+            if (r is Map) {
+              for (final col in ['filename', 'file', 'name', 'asset', 'path']) {
+                final v = r[col]?.toString();
+                if (v != null && v == filename) {
+                  flashcardId = r['id']?.toString();
+                  break;
+                }
+              }
+              if (flashcardId != null && flashcardId.isNotEmpty) break;
+            }
+          }
+        } catch (_) {
+          // ignore
+        }
+      }
+
+      if (flashcardId == null || flashcardId.isEmpty) {
+        // Show user-friendly dialog and abort the persist operation.
+        if (mounted) {
+          showCupertinoDialog(
+            context: context,
+            builder: (_) => CupertinoAlertDialog(
+              title: const Text('Error'),
+              content: Text('Could not find a flashcard for "$filename".'),
+              actions: [
+                CupertinoDialogAction(
+                  child: const Text('OK'),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ],
+            ),
+          );
+        }
+        return;
+      }
+
       final table = supabase.from('favorites');
       if (add) {
-        await table.insert({'flashcard_id': filename, 'user_id': user.id});
+        try {
+          await table.insert({'flashcard_id': flashcardId, 'user_id': user.id});
+        } catch (e) {
+          final msg = e.toString().toLowerCase();
+          // ignore duplicate key errors (unique constraint already exists)
+          if (msg.contains('duplicate') ||
+              msg.contains('23505') ||
+              msg.contains('already exists')) {
+            // ignore
+          } else {
+            rethrow;
+          }
+        }
       } else {
         await table
             .delete()
-            .eq('flashcard_id', filename)
+            .eq('flashcard_id', flashcardId)
             .eq('user_id', user.id);
       }
       // no special error field expected; just rely on exception on failure
     } catch (e) {
       // revert local change on error
       setState(() {
-        if (_favorites.contains(filename))
+        if (_favorites.contains(filename)) {
           _favorites.remove(filename);
-        else
+        } else {
           _favorites.add(filename);
+        }
       });
       // show a simple alert
       if (mounted) {

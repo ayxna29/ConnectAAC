@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:string_similarity/string_similarity.dart';
-import 'package:flutter/services.dart';
 
 class FlashcardGrid extends StatelessWidget {
   const FlashcardGrid({

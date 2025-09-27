@@ -43,3 +43,17 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# local secrets (do NOT commit)
+.env
+.env.local
+
+# Node / build
+node_modules/
+dist/
+npm-debug.log
+yarn-error.log
+
+# IDE
+.vscode/
+.DS_Store
