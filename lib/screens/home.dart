@@ -5,9 +5,13 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:string_similarity/string_similarity.dart';
 import '../widgets/flashcard_grid.dart';
+import '../services/flashcard_service.dart';
+import '../services/asset_service.dart';
+import '../services/ai_service.dart' show sendFlashcardFeedback;
 import 'settings.dart'; // added
 import 'optimization.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../services/backend_config.dart';
 
 class SelectedCard {
   final String word;
@@ -34,16 +38,82 @@ class _MyHomePageState extends State<MyHomePage> {
   double _currentRate = 0.5;
   double _currentVolume = 1.0;
 
-  static const List<String> _availableFilenames = [
-    "aeroplane.svg",
-    "car.svg",
-    "bicycle.svg",
-    "dog.svg",
-  ];
-
   // local favorites/tags (keeps UI responsive; persisted in OptimizationPage)
   final Set<String> _favorites = {};
   final Map<String, List<String>> _tags = {};
+
+  // AI generation state
+  final FlashcardService _flashcardService = FlashcardService();
+  bool _loadingGeneration = false;
+  bool _generating = false;
+  List<GeneratedFlashcard> _generated = [];
+  Map<String, String> _preMapped = {}; // word -> filename
+  List<String> _availableFilenames = [];
+
+  int _genToken = 0;
+
+  GeneratedFlashcard? _findGeneratedByWord(String word) {
+    try {
+      return _generated.firstWhere(
+        (g) => g.answer.toLowerCase() == word.toLowerCase(),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _rateWord(String word, String? filename) async {
+    final card = _findGeneratedByWord(word);
+    if (card == null || card.id.isEmpty) return; // only for generated cards
+    final rating = await showCupertinoDialog<int>(
+      context: context,
+      builder: (_) => CupertinoAlertDialog(
+        title: Text('Rate "${card.answer}"'),
+        content: const Text('How helpful was this flashcard?'),
+        actions: [
+          CupertinoDialogAction(
+            onPressed: () => Navigator.of(context).pop(1),
+            child: const Text('1'),
+          ),
+          CupertinoDialogAction(
+            onPressed: () => Navigator.of(context).pop(2),
+            child: const Text('2'),
+          ),
+          CupertinoDialogAction(
+            onPressed: () => Navigator.of(context).pop(3),
+            child: const Text('3'),
+          ),
+          CupertinoDialogAction(
+            onPressed: () => Navigator.of(context).pop(4),
+            child: const Text('4'),
+          ),
+          CupertinoDialogAction(
+            onPressed: () => Navigator.of(context).pop(5),
+            child: const Text('5'),
+          ),
+        ],
+      ),
+    );
+    if (rating == null) return;
+    try {
+      await sendFlashcardFeedback(cardId: card.id, rating: rating);
+    } catch (e) {
+      if (!mounted) return;
+      showCupertinoDialog(
+        context: context,
+        builder: (_) => CupertinoAlertDialog(
+          title: const Text('Feedback Error'),
+          content: Text(e.toString()),
+          actions: [
+            CupertinoDialogAction(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+    }
+  }
 
   @override
   void initState() {
@@ -51,6 +121,7 @@ class _MyHomePageState extends State<MyHomePage> {
     _speech = stt.SpeechToText();
     _tts = FlutterTts();
     _configureTts();
+    _loadAssets();
   }
 
   Future<void> _configureTts() async {
@@ -65,6 +136,62 @@ class _MyHomePageState extends State<MyHomePage> {
     } catch (e) {
       // ignore: avoid_print
       print('TTS init error: $e');
+    }
+  }
+
+  Future<void> _loadAssets() async {
+    try {
+      final files = await AssetService.listSymbolFilenames();
+      if (mounted) {
+        setState(() => _availableFilenames = files);
+      }
+    } catch (e) {
+      // ignore asset load errors silently for now
+    }
+  }
+
+  Future<void> _generateFromInput() async {
+    final input = caregiverInputController.text.trim();
+    if (input.isEmpty) return;
+    // Show 15 placeholder slots immediately
+    setState(() {
+      _loadingGeneration = true;
+      _generated = [];
+      _preMapped = {};
+    });
+    try {
+      final token = ++_genToken;
+      final cards = await _flashcardService.generate(caregiverInput: input);
+      if (token != _genToken) return; // stale
+      // Build mapping word -> filename for grid to avoid re-fuzzy each build
+      final mapping = <String, String>{};
+      for (final c in cards) {
+        if (c.assetFilename != null) {
+          mapping[c.answer] = c.assetFilename!;
+        }
+      }
+      setState(() {
+        _generated = cards;
+        _preMapped = mapping;
+        _loadingGeneration = false;
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() => _loadingGeneration = false);
+        showDialog(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text('Generation Error'),
+            content: Text('$e\nCheck backend running & CORS.'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+      }
     }
   }
 
@@ -184,6 +311,7 @@ class _MyHomePageState extends State<MyHomePage> {
       selected.add(SelectedCard(inputText.trim(), filename));
     });
     _speakNow(inputText.trim());
+    // Optionally trigger generation after manual entry
   }
 
   Future<void> _toggleListening() async {
@@ -197,6 +325,11 @@ class _MyHomePageState extends State<MyHomePage> {
         if (mounted) setState(() => _isListening = val == 'listening');
         if (val == 'done' || val == 'notListening') {
           if (mounted) setState(() => _isListening = false);
+          // Auto-generate when speech ends and we have at least 3 characters
+          final text = caregiverInputController.text.trim();
+          if (text.length >= 3) {
+            _generateFromInput();
+          }
         }
       },
       onError: (val) {
@@ -572,6 +705,18 @@ class _MyHomePageState extends State<MyHomePage> {
                   const SizedBox(width: 8),
                   CupertinoButton(
                     padding: EdgeInsets.zero,
+                    onPressed: _loadingGeneration ? null : _generateFromInput,
+                    child: _loadingGeneration
+                        ? const CupertinoActivityIndicator()
+                        : const Icon(
+                            CupertinoIcons.sparkles,
+                            size: 28,
+                            color: CupertinoColors.activeGreen,
+                          ),
+                  ),
+                  const SizedBox(width: 4),
+                  CupertinoButton(
+                    padding: EdgeInsets.zero,
                     onPressed: _onKeyboardPressed,
                     child: const Icon(
                       CupertinoIcons.keyboard,
@@ -657,6 +802,10 @@ class _MyHomePageState extends State<MyHomePage> {
                   onToggleFavorite: _onToggleFavorite,
                   favorites: _favorites,
                   tags: _tags,
+                  words: _generated.map((g) => g.answer).toList(),
+                  preMapped: _preMapped,
+                  availableFilenames: _availableFilenames,
+                  onRate: _rateWord,
                 ),
               ),
             ),

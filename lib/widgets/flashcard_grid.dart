@@ -10,28 +10,32 @@ class FlashcardGrid extends StatelessWidget {
     this.favorites,
     this.onToggleFavorite,
     this.tags,
+    this.availableFilenames,
+    this.preMapped, // optional explicit mapping word -> filename
+    this.onRate,
   });
 
-  final List<String>? words;
+  final List<String>? words; // list of words/answers to display
   final ValueChanged<String>? onCardTap;
   final ValueChanged<String>? onToggleFavorite;
   final Set<String>? favorites; // set of filenames (e.g. 'dog.svg')
   final Map<String, List<String>>? tags; // filename -> tags
-
-  static const List<String> _availableFilenames = [
-    "aeroplane.svg",
-    "car.svg",
-    "bicycle.svg",
-    "dog.svg",
-  ];
+  final List<String>? availableFilenames; // injected list of symbol filenames
+  final Map<String, String>? preMapped; // if provided, bypass fuzzy per word
+  final void Function(String word, String? filename)? onRate; // rating callback
 
   static const double _matchThreshold = 0.5;
 
   String? _findBestMatch(String word) {
+    if (preMapped != null && preMapped!.containsKey(word)) {
+      return preMapped![word];
+    }
+    final pool = availableFilenames ?? const <String>[];
+    if (pool.isEmpty) return null;
     var bestScore = 0.0;
     String? bestFile;
     final lowerWord = word.toLowerCase();
-    for (final file in _availableFilenames) {
+    for (final file in pool) {
       final nameOnly = file.toLowerCase().replaceAll(RegExp(r'\.svg$'), '');
       final score = StringSimilarity.compareTwoStrings(lowerWord, nameOnly);
       if (score > bestScore) {
@@ -45,7 +49,7 @@ class FlashcardGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final items = words ?? <String>['airplane', 'car', 'bicycle', 'dog'];
+    final items = words ?? const <String>[];
 
     // Build list of tuples (word, matchedFilename)
     final mapped = items.map((w) {
@@ -98,6 +102,9 @@ class FlashcardGrid extends StatelessWidget {
             return GestureDetector(
               onTap: () {
                 if (onCardTap != null) onCardTap!(word);
+              },
+              onLongPress: () {
+                if (onRate != null) onRate!(word, filename);
               },
               child: Card(
                 elevation: 2,

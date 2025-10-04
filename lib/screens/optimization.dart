@@ -1,7 +1,7 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../services/ai_service.dart';
+// Removed ai_service import (no AI generation in this screen by design)
 
 class OptimizationPage extends StatefulWidget {
   const OptimizationPage({super.key});
@@ -14,10 +14,6 @@ class _OptimizationPageState extends State<OptimizationPage> {
   final supabase = Supabase.instance.client;
 
   bool _loading = false;
-
-  // generation input controller and selected tag for AI
-  final TextEditingController _generationController = TextEditingController();
-  String? _selectedTag;
 
   // favorites UI
   final TextEditingController _favController = TextEditingController();
@@ -45,7 +41,6 @@ class _OptimizationPageState extends State<OptimizationPage> {
   void dispose() {
     _favController.dispose();
     _newTagController.dispose();
-    _generationController.dispose();
     for (final c in _perTagControllers.values) {
       c.dispose();
     }
@@ -538,25 +533,6 @@ class _OptimizationPageState extends State<OptimizationPage> {
         ],
       ),
     );
-  }
-
-  Future<void> _onGeneratePressed() async {
-    final prompt = _generationController.text
-        .trim(); // ensure you have a TextEditingController
-    if (prompt.isEmpty) return;
-    setState(() => _loading = true);
-    try {
-      final created = await generateFlashcardsFromAI(prompt, tag: _selectedTag);
-      // Option A: reload from Supabase (recommended) to show saved cards:
-      await _loadFlashcards();
-      // Option B: merge created into local UI state if you manage it locally:
-      // _localFlashcards.insertAll(0, created);
-      _showDialog('Success', 'Created ${created.length} flashcards');
-    } catch (e) {
-      _showDialog('Error', e.toString());
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
   }
 
   @override

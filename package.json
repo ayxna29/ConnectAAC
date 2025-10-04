@@ -5,6 +5,7 @@
     "typescript": "^5.9.2"
   },
   "dependencies": {
+    "cors": "^2.8.5",
     "zod": "^4.1.11"
   },
   "scripts": {
