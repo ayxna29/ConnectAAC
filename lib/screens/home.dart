@@ -11,7 +11,6 @@ import '../services/ai_service.dart' show sendFlashcardFeedback;
 import 'settings.dart'; // added
 import 'optimization.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../services/backend_config.dart';
 
 class SelectedCard {
   final String word;
@@ -38,8 +37,7 @@ class _MyHomePageState extends State<MyHomePage> {
   double _currentRate = 0.5;
   double _currentVolume = 1.0;
 
-  // local favorites/tags (keeps UI responsive; persisted in OptimizationPage)
-  final Set<String> _favorites = {};
+  // local tags (keeps UI responsive)
   final Map<String, List<String>> _tags = {};
 
   // AI generation state
@@ -49,6 +47,10 @@ class _MyHomePageState extends State<MyHomePage> {
   List<GeneratedFlashcard> _generated = [];
   Map<String, String> _preMapped = {}; // word -> filename
   List<String> _availableFilenames = [];
+
+  // favorites state
+  final Set<String> _favoriteIds = {};
+  List<GeneratedFlashcard> _favoriteCards = [];
 
   int _genToken = 0;
 
@@ -121,7 +123,7 @@ class _MyHomePageState extends State<MyHomePage> {
     _speech = stt.SpeechToText();
     _tts = FlutterTts();
     _configureTts();
-    _loadAssets();
+    _loadAssets().then((_) => _initFavorites());
   }
 
   Future<void> _configureTts() async {
@@ -141,7 +143,7 @@ class _MyHomePageState extends State<MyHomePage> {
 
   Future<void> _loadAssets() async {
     try {
-      final files = await AssetService.listSymbolFilenames();
+      final files = await AssetService.listSymbolFilenames(); // fixed
       if (mounted) {
         setState(() => _availableFilenames = files);
       }
@@ -150,30 +152,140 @@ class _MyHomePageState extends State<MyHomePage> {
     }
   }
 
+  Future<void> _initFavorites() async {
+    try {
+      final favs = await _flashcardService.fetchFavorites();
+      if (!mounted) return;
+
+      setState(() {
+        _favoriteIds.clear();
+        _favoriteCards.clear();
+
+        for (final f in favs) {
+          _favoriteIds.add(f.id);
+          //  Use backend assetFilename directly, don't remap
+          _favoriteCards.add(
+            GeneratedFlashcard(
+              id: f.id,
+              question: f.question,
+              answer: f.answer,
+              tags: const [],
+              assetFilename: f.assetFilename, //  Use backend value
+            ),
+          );
+        }
+      });
+    } catch (e) {
+      print('Failed to load favorites: $e');
+    }
+  }
+
+  bool _isFavorite(String id) => _favoriteIds.contains(id);
+
+  Future<void> _toggleFavorite(GeneratedFlashcard card) async {
+    final wasFav = _favoriteIds.contains(card.id);
+
+    // Optimistic update
+    setState(() {
+      if (wasFav) {
+        _favoriteIds.remove(card.id);
+        _favoriteCards.removeWhere((c) => c.id == card.id);
+      } else {
+        _favoriteIds.add(card.id);
+        _favoriteCards.add(card);
+      }
+    });
+
+    try {
+      if (wasFav) {
+        await _flashcardService.unfavoriteCard(card.id);
+      } else {
+        await _flashcardService.favoriteCard(card.id);
+      }
+    } catch (e) {
+      // Revert on error
+      setState(() {
+        if (wasFav) {
+          _favoriteIds.add(card.id);
+          _favoriteCards.add(card);
+        } else {
+          _favoriteIds.remove(card.id);
+          _favoriteCards.removeWhere((c) => c.id == card.id);
+        }
+      });
+
+      if (mounted) {
+        showCupertinoDialog(
+          context: context,
+          builder: (_) => CupertinoAlertDialog(
+            title: const Text('Error'),
+            content: Text('Failed to save favorite: $e'),
+            actions: [
+              CupertinoDialogAction(
+                child: const Text('OK'),
+                onPressed: () => Navigator.pop(context),
+              ),
+            ],
+          ),
+        );
+      }
+    }
+  }
+
   Future<void> _generateFromInput() async {
     final input = caregiverInputController.text.trim();
     if (input.isEmpty) return;
-    // Show 15 placeholder slots immediately
+
     setState(() {
       _loadingGeneration = true;
-      _generated = [];
+      _generated = []; // Only clear generated, NOT favorites
       _preMapped = {};
+      // DON'T touch _favoriteCards or _favoriteIds here
     });
+
     try {
       final token = ++_genToken;
       final cards = await _flashcardService.generate(caregiverInput: input);
-      if (token != _genToken) return; // stale
-      // Build mapping word -> filename for grid to avoid re-fuzzy each build
+      if (token != _genToken) return;
+
       final mapping = <String, String>{};
       for (final c in cards) {
         if (c.assetFilename != null) {
           mapping[c.answer] = c.assetFilename!;
         }
       }
+      // Also add favorite cards to mapping
+      for (final c in _favoriteCards) {
+        if (c.assetFilename != null) {
+          mapping[c.answer] = c.assetFilename!;
+        }
+      }
+
       setState(() {
         _generated = cards;
         _preMapped = mapping;
         _loadingGeneration = false;
+
+        // Update favorite IDs to match regenerated cards with same answers
+        final newFavoriteIds = <String>{};
+        for (final favCard in _favoriteCards) {
+          // Find matching card in new generation by answer
+          final match = cards.firstWhere(
+            (c) => c.answer.toLowerCase() == favCard.answer.toLowerCase(),
+            orElse: () => favCard, // Keep old card if not found
+          );
+          newFavoriteIds.add(match.id);
+
+          // Update the favorite card with new ID
+          if (match.id != favCard.id) {
+            final index = _favoriteCards.indexWhere((c) => c.id == favCard.id);
+            if (index != -1) {
+              _favoriteCards[index] = match;
+            }
+          }
+        }
+        _favoriteIds.clear();
+        _favoriteIds.addAll(newFavoriteIds);
       });
     } catch (e) {
       if (mounted) {
@@ -325,7 +437,6 @@ class _MyHomePageState extends State<MyHomePage> {
         if (mounted) setState(() => _isListening = val == 'listening');
         if (val == 'done' || val == 'notListening') {
           if (mounted) setState(() => _isListening = false);
-          // Auto-generate when speech ends and we have at least 3 characters
           final text = caregiverInputController.text.trim();
           if (text.length >= 3) {
             _generateFromInput();
@@ -336,7 +447,8 @@ class _MyHomePageState extends State<MyHomePage> {
         if (mounted) setState(() => _isListening = false);
       },
     );
-    if (!available || !await _speech.hasPermission) {
+    if (!available || _speech.hasPermission != true) {
+      // was: await _speech.hasPermission
       if (mounted) {
         showCupertinoDialog(
           context: context,
@@ -399,169 +511,37 @@ class _MyHomePageState extends State<MyHomePage> {
     setState(() {
       selected.add(SelectedCard(word, filename));
     });
-    // speak immediately, non-blocking UI
     _speakNow(word);
   }
 
   // toggle favorite from grid
-  void _onToggleFavorite(String idOrFilename) {
-    // grid passes filename if available else the word
-    String? filename = idOrFilename;
-    if (!filename.endsWith('.svg')) {
-      // try to map word -> filename
-      final mapped = _findBestFilename(filename);
-      filename = mapped;
-    }
-    if (filename == null) return;
-    final nonNullFilename = filename;
-    // optimistic local update
-    setState(() {
-      if (_favorites.contains(nonNullFilename)) {
-        _favorites.remove(nonNullFilename);
-      } else {
-        _favorites.add(nonNullFilename);
-      }
-    });
+  Future<void> _onToggleFavorite(String cardId) async {
+    // Find the card in _generated or _favoriteCards list
+    GeneratedFlashcard? card = _generated.firstWhere(
+      (c) => c.id == cardId,
+      orElse: () => _favoriteCards.firstWhere(
+        (c) => c.id == cardId,
+        orElse: () => throw Exception('Card not found'),
+      ),
+    );
 
-    // persist to Supabase
-    _persistFavorite(nonNullFilename, _favorites.contains(nonNullFilename));
+    // Use the proper toggleFavorite method
+    await _toggleFavorite(card);
   }
 
-  Future<void> _persistFavorite(String filename, bool add) async {
-    try {
-      final supabase = Supabase.instance.client;
-      final user = supabase.auth.currentUser;
-      if (user == null) {
-        // show sign-in required dialog
-        showCupertinoDialog(
-          context: context,
-          builder: (_) => CupertinoAlertDialog(
-            title: const Text('Sign in required'),
-            content: const Text('Please sign in to save favorites.'),
-            actions: [
-              CupertinoDialogAction(
-                child: const Text('OK'),
-                onPressed: () => Navigator.of(context).pop(),
-              ),
-            ],
-          ),
-        );
-        return;
-      }
+  // Get words sorted with favorites first, then generated (no duplicates)
+  List<String> _getSortedWords() {
+    // Get favorite words that aren't in current generation
+    final generatedAnswers = _generated
+        .map((c) => c.answer.toLowerCase())
+        .toSet();
+    final favWords = _favoriteCards
+        .where((c) => !generatedAnswers.contains(c.answer.toLowerCase()))
+        .map((c) => c.answer)
+        .toList();
 
-      // Persist favorites using your schema (flashcard_id (uuid), user_id).
-      // We store flashcard references by UUID in the favorites table, so
-      // first lookup the flashcard id by filename.
-      // Find the flashcard.id for the given filename. Different DB exports may
-      // store the filename in a different column name, so try a few candidates.
-      final candidateCols = ['filename', 'file', 'name', 'asset', 'path'];
-      String? flashcardId;
-      for (final col in candidateCols) {
-        try {
-          final fcRes = await supabase
-              .from('flashcards')
-              .select('id')
-              .eq(col, filename);
-          final rows = fcRes as List<dynamic>;
-          if (rows.isNotEmpty) {
-            flashcardId = (rows.first as Map)['id']?.toString();
-            if (flashcardId != null && flashcardId.isNotEmpty) break;
-          }
-        } catch (_) {
-          // ignore and try next column name
-        }
-      }
-
-      if (flashcardId == null || flashcardId.isEmpty) {
-        // Try a fallback: fetch all flashcards and try to match by filename value
-        try {
-          final allRes = await supabase.from('flashcards').select('*');
-          final rows = allRes as List<dynamic>;
-          for (final r in rows) {
-            if (r is Map) {
-              for (final col in ['filename', 'file', 'name', 'asset', 'path']) {
-                final v = r[col]?.toString();
-                if (v != null && v == filename) {
-                  flashcardId = r['id']?.toString();
-                  break;
-                }
-              }
-              if (flashcardId != null && flashcardId.isNotEmpty) break;
-            }
-          }
-        } catch (_) {
-          // ignore
-        }
-      }
-
-      if (flashcardId == null || flashcardId.isEmpty) {
-        // Show user-friendly dialog and abort the persist operation.
-        if (mounted) {
-          showCupertinoDialog(
-            context: context,
-            builder: (_) => CupertinoAlertDialog(
-              title: const Text('Error'),
-              content: Text('Could not find a flashcard for "$filename".'),
-              actions: [
-                CupertinoDialogAction(
-                  child: const Text('OK'),
-                  onPressed: () => Navigator.of(context).pop(),
-                ),
-              ],
-            ),
-          );
-        }
-        return;
-      }
-
-      final table = supabase.from('favorites');
-      if (add) {
-        try {
-          await table.insert({'flashcard_id': flashcardId, 'user_id': user.id});
-        } catch (e) {
-          final msg = e.toString().toLowerCase();
-          // ignore duplicate key errors (unique constraint already exists)
-          if (msg.contains('duplicate') ||
-              msg.contains('23505') ||
-              msg.contains('already exists')) {
-            // ignore
-          } else {
-            rethrow;
-          }
-        }
-      } else {
-        await table
-            .delete()
-            .eq('flashcard_id', flashcardId)
-            .eq('user_id', user.id);
-      }
-      // no special error field expected; just rely on exception on failure
-    } catch (e) {
-      // revert local change on error
-      setState(() {
-        if (_favorites.contains(filename)) {
-          _favorites.remove(filename);
-        } else {
-          _favorites.add(filename);
-        }
-      });
-      // show a simple alert
-      if (mounted) {
-        showCupertinoDialog(
-          context: context,
-          builder: (_) => CupertinoAlertDialog(
-            title: const Text('Error'),
-            content: Text('Failed to save favorite: $e'),
-            actions: [
-              CupertinoDialogAction(
-                child: const Text('OK'),
-                onPressed: () => Navigator.of(context).pop(),
-              ),
-            ],
-          ),
-        );
-      }
-    }
+    // Combine: favorites first, then generated
+    return [...favWords, ..._generated.map((g) => g.answer)];
   }
 
   // backspace: remove last
@@ -790,7 +770,7 @@ class _MyHomePageState extends State<MyHomePage> {
               ),
             ),
 
-            // flashcard grid
+            // flashcard grid (favorites appear first, no separate row)
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.symmetric(
@@ -800,11 +780,15 @@ class _MyHomePageState extends State<MyHomePage> {
                 child: FlashcardGrid(
                   onCardTap: _onFlashcardTap,
                   onToggleFavorite: _onToggleFavorite,
-                  favorites: _favorites,
+                  favorites: _favoriteIds, // pass card IDs instead of filenames
                   tags: _tags,
-                  words: _generated.map((g) => g.answer).toList(),
+                  words: _getSortedWords(), // favorites first, then generated
                   preMapped: _preMapped,
                   availableFilenames: _availableFilenames,
+                  wordToCardId: {
+                    for (final card in [..._favoriteCards, ..._generated])
+                      card.answer: card.id,
+                  }, // map word -> card ID
                   onRate: _rateWord,
                 ),
               ),

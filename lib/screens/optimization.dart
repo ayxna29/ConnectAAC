@@ -30,6 +30,8 @@ class _OptimizationPageState extends State<OptimizationPage> {
   final Map<String, String> _imageForText = {};
   // new: words grouped by tag for quick UI rendering
   final Map<String, List<String>> _wordsByTag = {};
+  // words grouped by tag for _addWord (used in _addWord method)
+  final Map<String, List<String>> _taggedWords = {};
 
   @override
   void initState() {
@@ -533,6 +535,182 @@ class _OptimizationPageState extends State<OptimizationPage> {
         ],
       ),
     );
+  }
+
+  Future<void> _addTag(String filename) async {
+    final controller = TextEditingController();
+    final result = await showCupertinoDialog<String>(
+      context: context,
+      builder: (_) => CupertinoAlertDialog(
+        title: const Text('Add Tag'),
+        content: Padding(
+          padding: const EdgeInsets.only(top: 8.0),
+          child: CupertinoTextField(
+            controller: controller,
+            placeholder: 'Enter tag name',
+            autofocus: true,
+          ),
+        ),
+        actions: [
+          CupertinoDialogAction(
+            child: const Text('Cancel'),
+            onPressed: () => Navigator.pop(context),
+          ),
+          CupertinoDialogAction(
+            child: const Text('Add'),
+            onPressed: () => Navigator.pop(context, controller.text.trim()),
+          ),
+        ],
+      ),
+    );
+
+    if (result == null || result.isEmpty) return;
+
+    try {
+      final supabase = Supabase.instance.client;
+      final user = supabase.auth.currentUser;
+      if (user == null) throw Exception('Not signed in');
+
+      // Find flashcard by filename
+      final flashcardRes = await supabase
+          .from('flashcards')
+          .select('id')
+          .eq('asset_filename', filename)
+          .limit(1)
+          .maybeSingle();
+
+      if (flashcardRes == null) {
+        throw Exception('Flashcard not found for: $filename');
+      }
+
+      final flashcardId = flashcardRes['id'] as String;
+
+      // Insert tag
+      await supabase.from('flashcard_tags').insert({
+        'flashcard_id': flashcardId,
+        'tag': result,
+        'user_id': user.id,
+      });
+
+      // Update local state
+      if (mounted) {
+        setState(() {
+          final tagList = _wordsByTag.putIfAbsent(result, () => <String>[]);
+          if (!tagList.contains(filename)) {
+            tagList.add(filename);
+          }
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        showCupertinoDialog(
+          context: context,
+          builder: (_) => CupertinoAlertDialog(
+            title: const Text('Error'),
+            content: Text('Failed to add tag: $e'),
+            actions: [
+              CupertinoDialogAction(
+                child: const Text('OK'),
+                onPressed: () => Navigator.pop(context),
+              ),
+            ],
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _addWord(String tag) async {
+    final controller = TextEditingController();
+    final result = await showCupertinoDialog<String>(
+      context: context,
+      builder: (_) => CupertinoAlertDialog(
+        title: Text('Add word to "$tag"'),
+        content: Padding(
+          padding: const EdgeInsets.only(top: 8.0),
+          child: CupertinoTextField(
+            controller: controller,
+            placeholder: 'Enter word',
+            autofocus: true,
+          ),
+        ),
+        actions: [
+          CupertinoDialogAction(
+            child: const Text('Cancel'),
+            onPressed: () => Navigator.pop(context),
+          ),
+          CupertinoDialogAction(
+            child: const Text('Add'),
+            onPressed: () => Navigator.pop(context, controller.text.trim()),
+          ),
+        ],
+      ),
+    );
+
+    if (result == null || result.isEmpty) return;
+
+    try {
+      final supabase = Supabase.instance.client;
+      final user = supabase.auth.currentUser;
+      if (user == null) throw Exception('Not signed in');
+
+      // Check if flashcard with this answer already exists
+      final existingCard = await supabase
+          .from('flashcards')
+          .select('id')
+          .eq('answer', result) // ✅ Changed from 'text' to 'answer'
+          .limit(1)
+          .maybeSingle();
+
+      String flashcardId;
+
+      if (existingCard != null) {
+        flashcardId = existingCard['id'] as String;
+      } else {
+        // Create new flashcard
+        final newCard = await supabase
+            .from('flashcards')
+            .insert({
+              'answer': result, // ✅ Changed from 'text' to 'answer'
+              'question': 'Custom word',
+              'created_at': DateTime.now().toIso8601String(),
+            })
+            .select('id')
+            .single();
+
+        flashcardId = newCard['id'] as String;
+      }
+
+      // Add tag association
+      await supabase.from('flashcard_tags').insert({
+        'flashcard_id': flashcardId,
+        'tag': tag,
+        'user_id': user.id,
+      });
+
+      // Update local state
+      if (mounted) {
+        setState(() {
+          _taggedWords[tag] = [...(_taggedWords[tag] ?? []), result];
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        showCupertinoDialog(
+          context: context,
+          builder: (_) => CupertinoAlertDialog(
+            title: const Text('Error'),
+            content: Text('Failed to add word: $e'),
+            actions: [
+              CupertinoDialogAction(
+                child: const Text('OK'),
+                onPressed: () => Navigator.pop(context),
+              ),
+            ],
+          ),
+        );
+      }
+    }
   }
 
   @override

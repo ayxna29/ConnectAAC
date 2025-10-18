@@ -1,9 +1,8 @@
 import 'dart:convert';
-import 'dart:math';
+// import 'dart:math'; // removed unused
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'asset_service.dart';
-import 'backend_config.dart';
 
 /// Simple model for generated flashcards consumed by UI
 class GeneratedFlashcard {
@@ -19,6 +18,38 @@ class GeneratedFlashcard {
     required this.tags,
     this.assetFilename,
   });
+}
+
+class FavoriteCard {
+  final String id;
+  final String question;
+  final String answer;
+  final String assetFilename; // ✅ Store backend asset filename
+
+  FavoriteCard({
+    required this.id,
+    required this.question,
+    required this.answer,
+    required this.assetFilename,
+  });
+
+  factory FavoriteCard.fromJson(Map<String, dynamic> json) {
+    return FavoriteCard(
+      id: (json['id'] ?? '').toString(),
+      question: (json['question'] ?? '').toString(),
+      answer: (json['answer'] ?? '').toString(),
+      assetFilename: (json['asset_filename'] ?? 'blank.svg').toString(),
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'question': question,
+      'answer': answer,
+      'asset_filename': assetFilename,
+    };
+  }
 }
 
 class FlashcardService {
@@ -41,7 +72,7 @@ class FlashcardService {
 
   Future<void> _ensureSymbols() async {
     if (_availableSymbolsCache != null) return;
-    _availableSymbolsCache = await AssetService.listSymbolFilenames();
+    _availableSymbolsCache = await AssetService.listSymbolFilenames(); // fixed
   }
 
   /// Generate 15 flashcards from backend given caregiver context.
@@ -58,17 +89,16 @@ class FlashcardService {
     final session = _supabase.auth.currentSession;
     final jwt = session?.accessToken;
 
-    // If caller did not provide tags, pull user's tag vocabulary from DB
     List<String>? tagsForRequest = explicitTags;
     if (tagsForRequest == null || tagsForRequest.isEmpty) {
       try {
-        final tagRes = await _supabase.from('tags').select('name');
-        final rows = tagRes as List<dynamic>? ?? [];
+        final res = await _supabase.from('tags').select('name');
+        final List<dynamic> rows = (res is List) ? res : <dynamic>[];
         tagsForRequest = rows
-            .whereType<Map>()
-            .map((r) => r['name']?.toString() ?? '')
+            .map((r) => (r is Map ? r['name']?.toString() : null))
+            .whereType<String>()
             .where((s) => s.isNotEmpty)
-            .toList();
+            .toList(); // <-- fixed
       } catch (_) {
         // ignore if tags cannot be fetched
       }
@@ -97,7 +127,7 @@ class FlashcardService {
     final resp = await http.post(
       Uri.parse('$backendBaseUrl/generate_flashcards'),
       headers: {
-        'Authorization': 'Bearer ${session?.accessToken ?? ''}',
+        'Authorization': 'Bearer ${jwt ?? ''}', // use the token we read above
         'Content-Type': 'application/json',
       },
       body: json.encode(body),
@@ -108,7 +138,8 @@ class FlashcardService {
     if (resp.statusCode != 200) {
       throw Exception('HTTP ${resp.statusCode}: ${resp.body}');
     }
-    final decoded = jsonDecode(resp.body) as Map<String, dynamic>;
+    final Map<String, dynamic> decoded =
+        json.decode(resp.body) as Map<String, dynamic>;
     final genId = decoded['generation_id']?.toString();
     if (genId != null && genId.isNotEmpty) {
       _lastGenerationId = genId; // store for next avoidance
@@ -124,6 +155,8 @@ class FlashcardService {
             tags: (m['tags'] as List<dynamic>? ?? [])
                 .map((t) => t.toString())
                 .toList(),
+            assetFilename: m['asset_filename']
+                ?.toString(), // ✅ Read from backend
           );
         })
         .where((c) => c.answer.isNotEmpty)
@@ -141,29 +174,8 @@ class FlashcardService {
       _recentAnswers.removeRange(60, _recentAnswers.length);
     }
 
-    // Map answers to assets
-    return _mapAssets(cards);
-  }
-
-  List<GeneratedFlashcard> _mapAssets(List<GeneratedFlashcard> cards) {
-    final pool = _availableSymbolsCache ?? const <String>[];
-    if (pool.isEmpty) return cards; // nothing to map
-
-    return cards.map((c) {
-      final normalized = c.answer.toLowerCase().trim();
-      final direct = _directMatch(normalized, pool);
-      final chosen =
-          direct ??
-          _synonymMatch(normalized, pool) ??
-          _fuzzyMatch(normalized, pool);
-      return GeneratedFlashcard(
-        id: c.id,
-        question: c.question,
-        answer: c.answer,
-        tags: c.tags,
-        assetFilename: chosen,
-      );
-    }).toList();
+    // ✅ Backend already matched symbols, just return the cards
+    return cards;
   }
 
   String? _directMatch(String word, List<String> pool) {
@@ -223,11 +235,12 @@ class FlashcardService {
     for (var i = 1; i <= m; i++) {
       for (var j = 1; j <= n; j++) {
         final cost = a[i - 1] == b[j - 1] ? 0 : 1;
+        // Use int-safe reducer instead of dart:math min (which infers num)
         dp[i][j] = [
           dp[i - 1][j] + 1,
           dp[i][j - 1] + 1,
           dp[i - 1][j - 1] + cost,
-        ].reduce(min);
+        ].reduce((x, y) => x < y ? x : y);
       }
     }
     return dp[m][n];
@@ -277,7 +290,6 @@ class FlashcardService {
     }
 
     final jsonResp = json.decode(resp.body);
-    final genId = jsonResp['generation_id']?.toString() ?? '';
     final list = (jsonResp['flashcards'] as List?) ?? [];
     final out = <GeneratedFlashcard>[];
 
@@ -288,19 +300,24 @@ class FlashcardService {
       if (q.isEmpty || a.isEmpty) continue;
       final keyWord = a.split(RegExp(r'\s+')).first;
       final asset = _matchAsset(keyWord);
-      out.add(GeneratedFlashcard(
-        id: (f['id'] ?? '').toString(),
-        question: q,
-        answer: a,
-        tags: (f['tags'] is List) ? (f['tags'] as List).map((t) => t.toString()).toList() : <String>[],
-        assetFilename: asset,
-      ));
+      out.add(
+        GeneratedFlashcard(
+          id: (f['id'] ?? '').toString(),
+          question: q,
+          answer: a,
+          tags: (f['tags'] is List)
+              ? (f['tags'] as List).map((t) => t.toString()).toList()
+              : <String>[],
+          assetFilename: asset,
+        ),
+      );
     }
     return out;
   }
 
   String? _matchAsset(String word) {
-    if (_availableSymbolsCache == null || _availableSymbolsCache!.isEmpty) return null;
+    if (_availableSymbolsCache == null || _availableSymbolsCache!.isEmpty)
+      return null;
     final normalized = word.toLowerCase().trim();
     final direct = _directMatch(normalized, _availableSymbolsCache!);
     final chosen =
@@ -311,11 +328,14 @@ class FlashcardService {
   }
 
   Future<void> _loadAssetIndex() async {
-    final base = 'http://localhost:5000';
+    final base = backendBaseUrl; // use configured backend base URL
     final session = _supabase.auth.currentSession;
     if (session == null) {
       throw Exception('Not signed in (session null)');
     }
+
+    // Ensure cache exists
+    _availableSymbolsCache ??= <String>[];
 
     final jwt = session.accessToken;
     final uri = Uri.parse('$base/list_assets');
@@ -329,29 +349,87 @@ class FlashcardService {
     if (resp.statusCode != 200) {
       throw Exception('HTTP ${resp.statusCode}: ${resp.body}');
     }
-    final jsonResp = json.decode(resp.body);
-    final List<dynamic> list = jsonResp['files'] ?? [];
+    final Map<String, dynamic> jsonResp =
+        json.decode(resp.body) as Map<String, dynamic>;
+    final List<dynamic> list = (jsonResp['files'] as List?) ?? <dynamic>[];
     final seen = <String>{}; // de-duplication set
     for (final f in list) {
       if (f is! Map) continue;
       final path = f['path']?.toString() ?? '';
       if (path.isEmpty) continue;
-      // inside _loadAssetIndex for-loop condition change:
       if (!(path.startsWith('assets/en-symbols/') ||
           path.startsWith('assets/mulberry-symbols/EN-symbols/') ||
           path.contains('/en-symbols/') ||
-          path.contains('/EN-symbols/')))
+          path.contains('/EN-symbols/'))) {
         continue;
-      // Normalize & filter duplicates
+      }
+
+      // Normalize to base filename only (avoid double prefixing in UI)
       final normalized = path
           .replaceAll('\\', '/')
-          .replaceAll('assets/en-symbols/', '')
-          .replaceAll('assets/mulberry-symbols/EN-symbols/', '');
+          .split('/')
+          .last; // e.g., dog.svg
       if (normalized.isEmpty || seen.contains(normalized)) continue;
       seen.add(normalized);
-      // Add both original and normalized paths for flexibility
-      _availableSymbolsCache?.add(normalized);
-      _availableSymbolsCache?.add(path);
+      _availableSymbolsCache!.add(normalized);
+    }
+  }
+
+  Future<List<FavoriteCard>> fetchFavorites() async {
+    final session = _supabase.auth.currentSession;
+    if (session == null) throw Exception('Not signed in');
+    final r = await http.get(
+      Uri.parse('$backendBaseUrl/flashcards/favorites'),
+      headers: {
+        'Authorization': 'Bearer ${session.accessToken}',
+        'Content-Type': 'application/json',
+      },
+    );
+    if (r.statusCode != 200) throw Exception('Favorites fetch ${r.statusCode}');
+    final body = json.decode(r.body);
+    final List<dynamic> list = (body is Map && body['favorites'] is List)
+        ? (body['favorites'] as List)
+        : <dynamic>[];
+    return list
+        .map((e) {
+          final m = (e is Map)
+              ? Map<String, dynamic>.from(e)
+              : <String, dynamic>{};
+          return FavoriteCard.fromJson(m); // ✅ Use factory method
+        })
+        .where((c) => c.id.isNotEmpty)
+        .toList();
+  }
+
+  Future<void> favoriteCard(String cardId) async {
+    final session = _supabase.auth.currentSession;
+    if (session == null) throw Exception('Not signed in');
+
+    final response = await http.post(
+      Uri.parse('$backendBaseUrl/flashcards/$cardId/favorite'),
+      headers: {'Authorization': 'Bearer ${session.accessToken}'},
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception(
+        'Failed to favorite: ${response.statusCode} ${response.body}',
+      );
+    }
+  }
+
+  Future<void> unfavoriteCard(String cardId) async {
+    final session = _supabase.auth.currentSession;
+    if (session == null) throw Exception('Not signed in');
+
+    final response = await http.delete(
+      Uri.parse('$backendBaseUrl/flashcards/$cardId/favorite'),
+      headers: {'Authorization': 'Bearer ${session.accessToken}'},
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception(
+        'Failed to unfavorite: ${response.statusCode} ${response.body}',
+      );
     }
   }
 }

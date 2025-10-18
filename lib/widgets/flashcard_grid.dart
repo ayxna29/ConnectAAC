@@ -12,16 +12,18 @@ class FlashcardGrid extends StatelessWidget {
     this.tags,
     this.availableFilenames,
     this.preMapped, // optional explicit mapping word -> filename
+    this.wordToCardId, // optional mapping word -> card ID
     this.onRate,
   });
 
   final List<String>? words; // list of words/answers to display
   final ValueChanged<String>? onCardTap;
-  final ValueChanged<String>? onToggleFavorite;
-  final Set<String>? favorites; // set of filenames (e.g. 'dog.svg')
+  final ValueChanged<String>? onToggleFavorite; // receives card ID
+  final Set<String>? favorites; // set of card IDs (not filenames)
   final Map<String, List<String>>? tags; // filename -> tags
   final List<String>? availableFilenames; // injected list of symbol filenames
   final Map<String, String>? preMapped; // if provided, bypass fuzzy per word
+  final Map<String, String>? wordToCardId; // word -> card ID mapping
   final void Function(String word, String? filename)? onRate; // rating callback
 
   static const double _matchThreshold = 0.5;
@@ -59,11 +61,12 @@ class FlashcardGrid extends StatelessWidget {
 
     // Reorder so favorites appear first (if favorites set provided)
     List<MapEntry<String, String?>> ordered;
-    if (favorites != null && favorites!.isNotEmpty) {
+    if (favorites != null && favorites!.isNotEmpty && wordToCardId != null) {
       final fav = <MapEntry<String, String?>>[];
       final other = <MapEntry<String, String?>>[];
       for (final e in mapped) {
-        if (e.value != null && favorites!.contains(e.value!)) {
+        final cardId = wordToCardId![e.key]; // get card ID for this word
+        if (cardId != null && favorites!.contains(cardId)) {
           fav.add(e);
         } else {
           other.add(e);
@@ -91,10 +94,11 @@ class FlashcardGrid extends StatelessWidget {
             final assetPath = (filename != null)
                 ? 'assets/mulberry-symbols/EN-symbols/$filename'
                 : null;
+            final cardId = wordToCardId?[word]; // get card ID for this word
             final isFavorite =
-                filename != null &&
+                cardId != null &&
                 favorites != null &&
-                favorites!.contains(filename);
+                favorites!.contains(cardId); // check by card ID
             final fileTags = (filename != null && tags != null)
                 ? tags![filename] ?? []
                 : <String>[];
@@ -176,9 +180,9 @@ class FlashcardGrid extends StatelessWidget {
                       top: 6,
                       child: GestureDetector(
                         onTap: () {
-                          // toggle favorite for this flashcard (pass filename if available else word)
-                          if (onToggleFavorite != null) {
-                            onToggleFavorite!(filename ?? word);
+                          // toggle favorite for this flashcard (pass card ID)
+                          if (onToggleFavorite != null && cardId != null) {
+                            onToggleFavorite!(cardId);
                           }
                         },
                         child: CircleAvatar(
@@ -203,7 +207,7 @@ class FlashcardGrid extends StatelessWidget {
                             horizontal: 6,
                           ),
                           decoration: BoxDecoration(
-                            color: Colors.black.withOpacity(0.06),
+                            color: Colors.black.withAlpha(15),
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: Text(
