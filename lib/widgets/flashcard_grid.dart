@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_svg/flutter_svg.dart';
+import 'safe_svg.dart';
 import 'package:string_similarity/string_similarity.dart';
 
 class FlashcardGrid extends StatelessWidget {
@@ -136,9 +136,10 @@ class FlashcardGrid extends StatelessWidget {
                                           vertical: 8.0,
                                           horizontal: 8.0,
                                         ),
-                                        child: SvgPicture.asset(
-                                          assetPath,
+                                        child: SafeSvg(
+                                          assetPath: assetPath,
                                           fit: BoxFit.contain,
+                                          height: 120,
                                         ),
                                       )
                                     : Container(

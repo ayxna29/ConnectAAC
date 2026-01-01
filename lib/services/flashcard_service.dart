@@ -89,20 +89,11 @@ class FlashcardService {
     final session = _supabase.auth.currentSession;
     final jwt = session?.accessToken;
 
-    List<String>? tagsForRequest = explicitTags;
-    if (tagsForRequest == null || tagsForRequest.isEmpty) {
-      try {
-        final res = await _supabase.from('tags').select('name');
-        final List<dynamic> rows = (res is List) ? res : <dynamic>[];
-        tagsForRequest = rows
-            .map((r) => (r is Map ? r['name']?.toString() : null))
-            .whereType<String>()
-            .where((s) => s.isNotEmpty)
-            .toList(); // <-- fixed
-      } catch (_) {
-        // ignore if tags cannot be fetched
-      }
-    }
+    // Use explicitTags only. Do not auto-fetch global tags from DB here.
+    // Tags should be applied per-generation by the caller to avoid leaking
+    // tag context between different questions.
+    final List<String>? tagsForRequest =
+        (explicitTags != null && explicitTags.isNotEmpty) ? explicitTags : null;
 
     // Build adaptive context including last successful answers (vocabulary memory)
     String adaptiveContext = caregiverInput.trim();
@@ -176,6 +167,25 @@ class FlashcardService {
 
     // ✅ Backend already matched symbols, just return the cards
     return cards;
+  }
+
+  /// Fetch user-defined tags (names) from user_tags table. Returns empty list on error.
+  Future<List<String>> fetchUserTags() async {
+    try {
+      final res = await _supabase
+          .from('user_tags')
+          .select('tag_name')
+          .order('created_at', ascending: true);
+      final rows = (res as List<dynamic>?) ?? <dynamic>[];
+      return rows
+          .whereType<Map>()
+          .map((r) => (r['tag_name'] ?? '').toString())
+          .where((s) => s.isNotEmpty)
+          .toList();
+    } catch (e) {
+      // ignore errors and return empty list
+      return <String>[];
+    }
   }
 
   String? _directMatch(String word, List<String> pool) {
@@ -298,7 +308,58 @@ class FlashcardService {
       final q = f['question']?.toString() ?? '';
       final a = f['answer']?.toString() ?? '';
       if (q.isEmpty || a.isEmpty) continue;
-      final keyWord = a.split(RegExp(r'\s+')).first;
+
+      // Select a useful keyword from the answer for asset matching.
+      // Prefer the first non-stopword token of reasonable length; fall back to last token.
+      final cleaned = a.replaceAll(RegExp(r"[^\w\s']"), '');
+      final tokens = cleaned
+          .split(RegExp(r'\s+'))
+          .where((s) => s.isNotEmpty)
+          .toList();
+      final stopwords = <String>{
+        'i',
+        "i'm",
+        'im',
+        'am',
+        'are',
+        'you',
+        'we',
+        'they',
+        'he',
+        'she',
+        'it',
+        'what',
+        'why',
+        'how',
+        'when',
+        'where',
+        'the',
+        'a',
+        'an',
+        'to',
+        'do',
+        'does',
+        'please',
+        'would',
+        'like',
+        'want',
+        'wanting',
+        'could',
+        'should',
+      };
+      String keyWord = '';
+      for (final t in tokens) {
+        final low = t.toLowerCase();
+        if (low.length > 2 && !stopwords.contains(low)) {
+          keyWord = low;
+          break;
+        }
+      }
+      if (keyWord.isEmpty) {
+        keyWord = tokens.isNotEmpty
+            ? tokens.last.toLowerCase()
+            : a.toLowerCase();
+      }
       final asset = _matchAsset(keyWord);
       out.add(
         GeneratedFlashcard(

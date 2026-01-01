@@ -1,7 +1,15 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-// Removed ai_service import (no AI generation in this screen by design)
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+
+// Model for context sentence
+class ContextSentence {
+  final String id;
+  final String text;
+  ContextSentence({required this.id, required this.text});
+}
 
 class OptimizationPage extends StatefulWidget {
   const OptimizationPage({super.key});
@@ -13,25 +21,26 @@ class OptimizationPage extends StatefulWidget {
 class _OptimizationPageState extends State<OptimizationPage> {
   final supabase = Supabase.instance.client;
 
+  // Backend URL used for optimization endpoints. Keep in sync with FlashcardService default.
+  final String backendBaseUrl = 'http://localhost:5000';
+
   bool _loading = false;
 
   // favorites UI
   final TextEditingController _favController = TextEditingController();
-  final List<String> _favoriteWords =
-      []; // UI-only list of chips (keeps in sync with DB when you wire it)
+  // UI list of favorites as maps with keys: id, word, asset
+  final List<Map<String, String>> _favoriteItems = [];
 
   // tags
   final TextEditingController _newTagController = TextEditingController();
-  final List<String> _tags =
-      []; // loaded from DB (fallback defaults added in _init)
+  final List<String> _tags = [];
   final Map<String, TextEditingController> _perTagControllers = {};
+
+  // Context sentences grouped by tag
+  final Map<String, List<ContextSentence>> _tagContexts = {};
 
   // flashcards (text -> image url)
   final Map<String, String> _imageForText = {};
-  // new: words grouped by tag for quick UI rendering
-  final Map<String, List<String>> _wordsByTag = {};
-  // words grouped by tag for _addWord (used in _addWord method)
-  final Map<String, List<String>> _taggedWords = {};
 
   @override
   void initState() {
@@ -64,19 +73,32 @@ class _OptimizationPageState extends State<OptimizationPage> {
 
   Future<void> _loadTags() async {
     try {
+      final user = supabase.auth.currentUser;
+      if (user == null) return;
       final res = await supabase
-          .from('tags')
-          .select('name')
+          .from('user_tags')
+          .select('id, tag_name, tag_contexts (id, context_text)')
+          .eq('user_id', user.id)
           .order('created_at', ascending: true);
       final rows = res as List<dynamic>? ?? [];
-      _tags
-        ..clear()
-        ..addAll(
-          rows
-              .whereType<Map>()
-              .map((r) => r['name']?.toString() ?? '')
-              .where((s) => s.isNotEmpty),
-        );
+      _tags.clear();
+      _tagContexts.clear();
+      for (final r in rows.whereType<Map>()) {
+        final tagName = r['tag_name']?.toString() ?? '';
+        if (tagName.isNotEmpty) {
+          _tags.add(tagName);
+          final contexts = <ContextSentence>[];
+          final ctxRows = r['tag_contexts'] as List<dynamic>? ?? [];
+          for (final ctx in ctxRows.whereType<Map>()) {
+            final ctxId = ctx['id']?.toString() ?? '';
+            final ctxText = ctx['context_text']?.toString() ?? '';
+            if (ctxText.isNotEmpty && ctxId.isNotEmpty) {
+              contexts.add(ContextSentence(id: ctxId, text: ctxText));
+            }
+          }
+          _tagContexts[tagName] = contexts;
+        }
+      }
       if (_tags.isEmpty) {
         _tags.addAll([
           'food',
@@ -88,7 +110,7 @@ class _OptimizationPageState extends State<OptimizationPage> {
       }
       setState(() {});
     } catch (e) {
-      // leave defaults
+      // fallback defaults
       if (_tags.isEmpty) {
         _tags.addAll([
           'food',
@@ -108,18 +130,12 @@ class _OptimizationPageState extends State<OptimizationPage> {
           .select('text,image_url,tag');
       final rows = res as List<dynamic>? ?? [];
       _imageForText.clear();
-      _wordsByTag.clear();
       for (final r in rows.whereType<Map>()) {
         final t = (r['text'] ?? '').toString();
         final img = (r['image_url'] ?? '').toString();
-        final tag = (r['tag'] ?? '').toString();
         if (t.isNotEmpty && img.isNotEmpty) _imageForText[t] = img;
         if (t.isNotEmpty) {
-          final list = _wordsByTag.putIfAbsent(
-            tag.isEmpty ? '__untagged' : tag,
-            () => <String>[],
-          );
-          if (!list.contains(t)) list.add(t);
+          // ...existing code...
         }
       }
       setState(() {});
@@ -132,30 +148,37 @@ class _OptimizationPageState extends State<OptimizationPage> {
     try {
       final user = supabase.auth.currentUser;
       if (user == null) return;
-      final res = await supabase.from('favorites').select('flashcard_id');
-      final rows = res as List<dynamic>? ?? [];
-      final ids = rows
-          .whereType<Map>()
-          .map((r) => r['flashcard_id']?.toString() ?? '')
-          .where((s) => s.isNotEmpty)
-          .toList();
-      if (ids.isNotEmpty) {
-        final quoted = ids
-            .map((s) => "'${s.replaceAll("'", "\\'")}'")
-            .join(',');
-        final fcRes = await supabase
-            .from('flashcards')
-            .select('text')
-            .filter('id', 'in', '($quoted)');
-        final fr = fcRes as List<dynamic>? ?? [];
-        _favoriteWords
-          ..clear()
-          ..addAll(
-            fr
-                .whereType<Map>()
-                .map((r) => r['text']?.toString() ?? '')
-                .where((s) => s.isNotEmpty),
-          );
+      // Fetch merged favorites from backend so Optimization UI shows all favorites
+      final session = supabase.auth.currentSession;
+      final jwt = session?.accessToken;
+      if (jwt == null) return;
+      final resp = await http.get(
+        Uri.parse('$backendBaseUrl/optimization/favorites'),
+        headers: {
+          'Authorization': 'Bearer ${jwt}',
+          'Content-Type': 'application/json',
+        },
+      );
+      if (resp.statusCode == 200) {
+        final body = resp.body;
+        try {
+          final parsed = body.isNotEmpty
+              ? Map<String, dynamic>.from(json.decode(body))
+              : {};
+          final list = (parsed['favorites'] as List<dynamic>?) ?? <dynamic>[];
+          _favoriteItems.clear();
+          for (final m in list.whereType<Map>()) {
+            final word = (m['word'] ?? m['answer'] ?? '').toString();
+            final id = (m['id'] ?? m['card_id'] ?? m['id'] ?? '').toString();
+            final asset = (m['asset_filename'] ?? '').toString();
+            if (word.isNotEmpty) {
+              _favoriteItems.add({'id': id, 'word': word, 'asset': asset});
+              if (asset.isNotEmpty) _imageForText[word] = asset;
+            }
+          }
+        } catch (e) {
+          // ignore parse errors
+        }
       }
       setState(() {});
     } catch (e) {
@@ -167,13 +190,59 @@ class _OptimizationPageState extends State<OptimizationPage> {
   Future<void> _addFavoriteWord() async {
     final word = _favController.text.trim();
     if (word.isEmpty) return;
-    // local UI update
-    if (!_favoriteWords.contains(word)) _favoriteWords.add(word);
+    // local UI update immediately for responsiveness
+    if (!_favoriteItems.any((it) => it['word'] == word)) {
+      _favoriteItems.add({'id': '', 'word': word, 'asset': ''});
+    }
     _favController.clear();
     setState(() {});
 
-    // optional: if you want to persist a favorite mapping create/find flashcard and insert into favorites table
-    // left out here — wire to your server / favorite logic if desired
+    // Persist via server so a flashcard + main favorite are created and it appears on the Home screen.
+    final session = supabase.auth.currentSession;
+    final jwt = session?.accessToken;
+    if (jwt == null) return; // not signed in, UI still shows local chip
+
+    try {
+      final resp = await http.post(
+        Uri.parse('$backendBaseUrl/optimization/favorites'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ${jwt}',
+        },
+        body: '{"word": "${word.replaceAll('"', '\\"')}"}',
+      );
+      if (resp.statusCode == 200) {
+        // success: backend created user_favorites and flashcard favorite.
+        // Parse returned merged favorites and update local UI immediately
+        try {
+          final parsed = resp.body.isNotEmpty
+              ? json.decode(resp.body) as Map<String, dynamic>
+              : {};
+          final list = (parsed['favorites'] as List<dynamic>?) ?? <dynamic>[];
+          _favoriteItems.clear();
+          for (final m in list.whereType<Map>()) {
+            final word = (m['word'] ?? m['answer'] ?? '').toString();
+            final id = (m['id'] ?? m['card_id'] ?? '').toString();
+            final asset = (m['asset_filename'] ?? '').toString();
+            if (word.isNotEmpty) {
+              _favoriteItems.add({'id': id, 'word': word, 'asset': asset});
+              if (asset.isNotEmpty) _imageForText[word] = asset;
+            }
+          }
+        } catch (e) {
+          // ignore parse issues but keep UI responsive
+        }
+      } else if (resp.statusCode == 409) {
+        // already exists - ignore
+      } else {
+        // keep UI responsive but log error
+        print(
+          'Failed to create optimization favorite: ${resp.statusCode} ${resp.body}',
+        );
+      }
+    } catch (e) {
+      print('Error calling optimization favorite endpoint: $e');
+    }
   }
 
   Future<void> _createTag() async {
@@ -185,9 +254,11 @@ class _OptimizationPageState extends State<OptimizationPage> {
     }
     setState(() => _loading = true);
     try {
-      await supabase.from('tags').insert({
-        'name': name,
+      // Persist tag as a user-specific tag so it appears in _loadTags
+      await supabase.from('user_tags').insert({
+        'tag_name': name,
         'user_id': supabase.auth.currentUser?.id,
+        'created_at': DateTime.now().toUtc().toIso8601String(),
       });
       _tags.add(name);
       _newTagController.clear();
@@ -198,98 +269,6 @@ class _OptimizationPageState extends State<OptimizationPage> {
     } finally {
       if (mounted) setState(() => _loading = false);
     }
-  }
-
-  Future<void> _addWordToTag(String tag) async {
-    final controller = _perTagControllers.putIfAbsent(
-      tag,
-      () => TextEditingController(),
-    );
-    final name = controller.text.trim();
-    if (name.isEmpty) return;
-    setState(() => _loading = true);
-    try {
-      final user = supabase.auth.currentUser;
-      if (user == null) {
-        _showDialog('Sign in required', 'You must sign in to add flashcards.');
-        return;
-      }
-      // insert new flashcard
-      final insert = await supabase.from('flashcards').insert({
-        'text': name,
-        'tag': tag,
-        'user_id': user.id,
-        'created_at': DateTime.now().toUtc().toIso8601String(),
-      }).select();
-      // update local grouped map for immediate UI feedback
-      final list = _wordsByTag.putIfAbsent(tag, () => <String>[]);
-      if (!list.contains(name)) list.add(name);
-      // try to find an existing image that matches term
-      final image = await _findMatchingImage(name);
-      if (image != null && image.isNotEmpty) {
-        // attempt to save image_url back to the inserted row if DB perms allow
-        try {
-          // get inserted id if available
-          String? id;
-          if (insert.isNotEmpty) {
-            id = insert[0]['id']?.toString();
-          }
-          if (id != null && id.isNotEmpty) {
-            await supabase
-                .from('flashcards')
-                .update({'image_url': image})
-                .eq('id', id);
-          }
-        } catch (_) {
-          // ignore permission issues
-        }
-        _imageForText[name] = image;
-      }
-      controller.clear();
-      _showDialog('Added', '"$name" added to #$tag');
-    } catch (e) {
-      _showDialog('Error', 'Failed to add word: $e');
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  Future<String?> _findMatchingImage(String term) async {
-    try {
-      final pattern = '%${term.replaceAll('%', '\\%')}%';
-      // 1) search image_url contains term
-      final r1 = await supabase
-          .from('flashcards')
-          .select('image_url')
-          .ilike('image_url', pattern)
-          .limit(1);
-      final rows1 = r1 as List<dynamic>? ?? [];
-      if (rows1.isNotEmpty && rows1[0] is Map) {
-        final img = (rows1[0]['image_url'] ?? '').toString();
-        if (img.isNotEmpty) return img;
-      }
-      // 2) search for common filename guesses
-      final guesses = [
-        '${term.toLowerCase()}.svg',
-        '${term.toLowerCase()}.png',
-        '${term.toLowerCase()}.jpg',
-      ];
-      for (final g in guesses) {
-        final rg = await supabase
-            .from('flashcards')
-            .select('image_url')
-            .ilike('image_url', '%$g%')
-            .limit(1);
-        final rgr = rg as List<dynamic>? ?? [];
-        if (rgr.isNotEmpty && rgr[0] is Map) {
-          final img = (rgr[0]['image_url'] ?? '').toString();
-          if (img.isNotEmpty) return img;
-        }
-      }
-    } catch (e) {
-      // ignore
-    }
-    return null;
   }
 
   Future<void> _deleteTag(String tag) async {
@@ -315,7 +294,16 @@ class _OptimizationPageState extends State<OptimizationPage> {
     );
     if (ok != true) return;
     try {
-      await supabase.from('tags').delete().eq('name', tag);
+      final user = supabase.auth.currentUser;
+      if (user == null) {
+        _showDialog('Sign in required', 'You must sign in to delete tags.');
+        return;
+      }
+      await supabase
+          .from('user_tags')
+          .delete()
+          .eq('user_id', user.id)
+          .eq('tag_name', tag);
       _tags.remove(tag);
       setState(() {});
     } catch (e) {
@@ -371,10 +359,66 @@ class _OptimizationPageState extends State<OptimizationPage> {
         const SizedBox(height: 8),
         Wrap(
           spacing: 8,
-          children: _favoriteWords.map((w) {
-            return Chip(
-              label: Text(w),
-              backgroundColor: CupertinoColors.systemGrey5,
+          children: _favoriteItems.map((item) {
+            final word = item['word'] ?? '';
+            return Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              decoration: BoxDecoration(
+                color: CupertinoColors.systemGrey5,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(word),
+                  const SizedBox(width: 8),
+                  GestureDetector(
+                    onTap: () async {
+                      // delete optimization favorite (if id present)
+                      final id = item['id'] ?? '';
+                      if (id.isEmpty) {
+                        // remove local optimistic entry
+                        setState(
+                          () => _favoriteItems.removeWhere(
+                            (it) => it['word'] == word,
+                          ),
+                        );
+                        return;
+                      }
+                      final session = supabase.auth.currentSession;
+                      final jwt = session?.accessToken;
+                      if (jwt == null) return;
+                      try {
+                        final resp = await http.delete(
+                          Uri.parse(
+                            '$backendBaseUrl/optimization/favorites/$id',
+                          ),
+                          headers: {
+                            'Authorization': 'Bearer ${jwt}',
+                            'Content-Type': 'application/json',
+                          },
+                        );
+                        if (resp.statusCode == 200) {
+                          setState(
+                            () => _favoriteItems.removeWhere(
+                              (it) => it['id'] == id || it['word'] == word,
+                            ),
+                          );
+                        } else {
+                          // ignore or show error
+                        }
+                      } catch (e) {
+                        // ignore
+                      }
+                    },
+                    child: const Icon(
+                      Icons.delete_outline,
+                      size: 18,
+                      color: Colors.red,
+                    ),
+                  ),
+                ],
+              ),
             );
           }).toList(),
         ),
@@ -414,11 +458,6 @@ class _OptimizationPageState extends State<OptimizationPage> {
         const SizedBox(height: 12),
         Column(
           children: _tags.map((tag) {
-            final controller = _perTagControllers.putIfAbsent(
-              tag,
-              () => TextEditingController(),
-            );
-            final words = (_wordsByTag[tag] ?? []).toList();
             return Container(
               margin: const EdgeInsets.symmetric(vertical: 8),
               padding: const EdgeInsets.all(8),
@@ -445,272 +484,221 @@ class _OptimizationPageState extends State<OptimizationPage> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: CupertinoTextField(
-                          controller: controller,
-                          placeholder: 'Add word to #$tag',
-                          onSubmitted: (_) => _addWordToTag(tag),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Container(
-                        decoration: BoxDecoration(
-                          color: Colors.blue,
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: IconButton(
-                          icon: const Icon(Icons.add, color: Colors.white),
-                          onPressed: () => _addWordToTag(tag),
-                        ),
-                      ),
-                    ],
-                  ),
                   const SizedBox(height: 10),
-                  // display added words under the box
-                  if (words.isNotEmpty)
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: Wrap(
-                        spacing: 8,
-                        runSpacing: 6,
-                        children: words.map((w) => _wordChip(w)).toList(),
-                      ),
-                    ),
+                  // context sentence section
+                  _contextSentenceSection(tag),
                 ],
               ),
             );
           }).toList(),
         ),
         const SizedBox(height: 12),
-        Align(
-          alignment: Alignment.centerRight,
-          child: CupertinoButton.filled(
-            child: const Text('Done'),
-            onPressed: () => Navigator.of(context).pop(),
-          ),
-        ),
+        // 'Done' button removed per UX request; user can navigate back using app controls.
       ],
     );
   }
 
-  // add this helper inside _OptimizationPageState
-  Widget _wordChip(String w) {
-    final img = _imageForText[w];
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: CupertinoColors.systemGrey5,
-        borderRadius: BorderRadius.circular(20),
-      ),
+  Future<void> _addContextSentence(String tag) async {
+    final controller = _perTagControllers.putIfAbsent(
+      tag,
+      () => TextEditingController(),
+    );
+    final text = controller.text.trim();
+    if (text.isEmpty) return;
+    setState(() => _loading = true);
+    try {
+      final user = supabase.auth.currentUser;
+      if (user == null) {
+        _showDialog('Sign in required', 'You must sign in to add context.');
+        return;
+      }
+      // Ensure tag exists in user_tags, create if missing
+      var tagRes = await supabase
+          .from('user_tags')
+          .select('id')
+          .eq('user_id', user.id)
+          .eq('tag_name', tag)
+          .maybeSingle();
+      if (tagRes == null || tagRes['id'] == null) {
+        // Insert user_tag if not found
+        final inserted = await supabase
+            .from('user_tags')
+            .insert({
+              'user_id': user.id,
+              'tag_name': tag,
+              'created_at': DateTime.now().toUtc().toIso8601String(),
+            })
+            .select()
+            .maybeSingle();
+        if (inserted == null || inserted['id'] == null) {
+          _showDialog('Error', 'Could not create tag for context.');
+          return;
+        }
+        tagRes = inserted;
+      }
+      final tagId = tagRes['id'].toString();
+      // Insert context sentence into tag_contexts
+      final insert = await supabase.from('tag_contexts').insert({
+        'tag_id': tagId,
+        'context_text': text,
+        'created_at': DateTime.now().toUtc().toIso8601String(),
+      }).select();
+      if (insert.isNotEmpty) {
+        final ctxId = insert[0]['id']?.toString() ?? '';
+        final ctx = ContextSentence(id: ctxId, text: text);
+        final list = _tagContexts.putIfAbsent(tag, () => <ContextSentence>[]);
+        list.add(ctx);
+      } else {
+        _showDialog('Error', 'Insert returned empty result.');
+      }
+      controller.clear();
+      setState(() {});
+    } catch (e) {
+      _showDialog('Error', 'Failed to add context: $e');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Widget _contextSentenceRow(String tag, ContextSentence ctx) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4.0),
       child: Row(
-        mainAxisSize: MainAxisSize.min,
         children: [
-          if (img != null && img.isNotEmpty)
-            Container(
-              width: 24,
-              height: 24,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                image: DecorationImage(
-                  image: NetworkImage(img),
-                  fit: BoxFit.cover,
-                ),
-              ),
+          Expanded(child: Text('- ${ctx.text}')),
+          IconButton(
+            icon: const Icon(Icons.edit, color: Colors.blueGrey, size: 20),
+            onPressed: () => _editContextSentence(tag, ctx),
+          ),
+          IconButton(
+            icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20),
+            onPressed: () => _deleteContextSentence(tag, ctx),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _editContextSentence(String tag, ContextSentence ctx) async {
+    final controller = TextEditingController(text: ctx.text);
+    final result = await showDialog<String?>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Edit context sentence'),
+        content: TextField(
+          controller: controller,
+          maxLines: null,
+          decoration: const InputDecoration(hintText: 'Context sentence'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(null),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(controller.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (result == null) return; // cancelled
+    final newText = result.trim();
+    if (newText.isEmpty || newText == ctx.text) return;
+    setState(() => _loading = true);
+    try {
+      await supabase
+          .from('tag_contexts')
+          .update({'context_text': newText})
+          .eq('id', ctx.id);
+      final list = _tagContexts[tag];
+      if (list != null) {
+        final index = list.indexWhere((c) => c.id == ctx.id);
+        if (index != -1)
+          list[index] = ContextSentence(id: ctx.id, text: newText);
+      }
+      setState(() {});
+    } catch (e) {
+      _showDialog('Error', 'Failed to update context: $e');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _deleteContextSentence(String tag, ContextSentence ctx) async {
+    setState(() => _loading = true);
+    try {
+      await supabase.from('tag_contexts').delete().eq('id', ctx.id);
+      final list = _tagContexts[tag];
+      if (list != null) {
+        list.removeWhere((c) => c.id == ctx.id);
+      }
+      setState(() {});
+    } catch (e) {
+      _showDialog('Error', 'Failed to delete context: $e');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Widget _contextSentenceSection(String tag) {
+    final controller = _perTagControllers.putIfAbsent(
+      tag,
+      () => TextEditingController(),
+    );
+    final contexts = _tagContexts[tag] ?? [];
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: CupertinoColors.systemGrey6,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Context Sentences',
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          // existing contexts
+          if (contexts.isNotEmpty)
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: contexts
+                  .map((ctx) => _contextSentenceRow(tag, ctx))
+                  .toList(),
             )
           else
-            Container(
-              width: 24,
-              height: 24,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: Colors.white24,
+            const Text('No context sentences yet.'),
+          const SizedBox(height: 8),
+          // new context input
+          Row(
+            children: [
+              Expanded(
+                child: CupertinoTextField(
+                  controller: controller,
+                  placeholder: 'Add context sentence',
+                  onSubmitted: (_) => _addContextSentence(tag),
+                ),
               ),
-              child: const Icon(Icons.text_fields, size: 16),
-            ),
-          const SizedBox(width: 8),
-          Text(w),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _addTag(String filename) async {
-    final controller = TextEditingController();
-    final result = await showCupertinoDialog<String>(
-      context: context,
-      builder: (_) => CupertinoAlertDialog(
-        title: const Text('Add Tag'),
-        content: Padding(
-          padding: const EdgeInsets.only(top: 8.0),
-          child: CupertinoTextField(
-            controller: controller,
-            placeholder: 'Enter tag name',
-            autofocus: true,
-          ),
-        ),
-        actions: [
-          CupertinoDialogAction(
-            child: const Text('Cancel'),
-            onPressed: () => Navigator.pop(context),
-          ),
-          CupertinoDialogAction(
-            child: const Text('Add'),
-            onPressed: () => Navigator.pop(context, controller.text.trim()),
-          ),
-        ],
-      ),
-    );
-
-    if (result == null || result.isEmpty) return;
-
-    try {
-      final supabase = Supabase.instance.client;
-      final user = supabase.auth.currentUser;
-      if (user == null) throw Exception('Not signed in');
-
-      // Find flashcard by filename
-      final flashcardRes = await supabase
-          .from('flashcards')
-          .select('id')
-          .eq('asset_filename', filename)
-          .limit(1)
-          .maybeSingle();
-
-      if (flashcardRes == null) {
-        throw Exception('Flashcard not found for: $filename');
-      }
-
-      final flashcardId = flashcardRes['id'] as String;
-
-      // Insert tag
-      await supabase.from('flashcard_tags').insert({
-        'flashcard_id': flashcardId,
-        'tag': result,
-        'user_id': user.id,
-      });
-
-      // Update local state
-      if (mounted) {
-        setState(() {
-          final tagList = _wordsByTag.putIfAbsent(result, () => <String>[]);
-          if (!tagList.contains(filename)) {
-            tagList.add(filename);
-          }
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        showCupertinoDialog(
-          context: context,
-          builder: (_) => CupertinoAlertDialog(
-            title: const Text('Error'),
-            content: Text('Failed to add tag: $e'),
-            actions: [
-              CupertinoDialogAction(
-                child: const Text('OK'),
-                onPressed: () => Navigator.pop(context),
+              const SizedBox(width: 8),
+              Container(
+                decoration: BoxDecoration(
+                  color: Colors.blue,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: IconButton(
+                  icon: const Icon(Icons.add, color: Colors.white),
+                  onPressed: () => _addContextSentence(tag),
+                ),
               ),
             ],
           ),
-        );
-      }
-    }
-  }
-
-  Future<void> _addWord(String tag) async {
-    final controller = TextEditingController();
-    final result = await showCupertinoDialog<String>(
-      context: context,
-      builder: (_) => CupertinoAlertDialog(
-        title: Text('Add word to "$tag"'),
-        content: Padding(
-          padding: const EdgeInsets.only(top: 8.0),
-          child: CupertinoTextField(
-            controller: controller,
-            placeholder: 'Enter word',
-            autofocus: true,
-          ),
-        ),
-        actions: [
-          CupertinoDialogAction(
-            child: const Text('Cancel'),
-            onPressed: () => Navigator.pop(context),
-          ),
-          CupertinoDialogAction(
-            child: const Text('Add'),
-            onPressed: () => Navigator.pop(context, controller.text.trim()),
-          ),
         ],
       ),
     );
-
-    if (result == null || result.isEmpty) return;
-
-    try {
-      final supabase = Supabase.instance.client;
-      final user = supabase.auth.currentUser;
-      if (user == null) throw Exception('Not signed in');
-
-      // Check if flashcard with this answer already exists
-      final existingCard = await supabase
-          .from('flashcards')
-          .select('id')
-          .eq('answer', result) // ✅ Changed from 'text' to 'answer'
-          .limit(1)
-          .maybeSingle();
-
-      String flashcardId;
-
-      if (existingCard != null) {
-        flashcardId = existingCard['id'] as String;
-      } else {
-        // Create new flashcard
-        final newCard = await supabase
-            .from('flashcards')
-            .insert({
-              'answer': result, // ✅ Changed from 'text' to 'answer'
-              'question': 'Custom word',
-              'created_at': DateTime.now().toIso8601String(),
-            })
-            .select('id')
-            .single();
-
-        flashcardId = newCard['id'] as String;
-      }
-
-      // Add tag association
-      await supabase.from('flashcard_tags').insert({
-        'flashcard_id': flashcardId,
-        'tag': tag,
-        'user_id': user.id,
-      });
-
-      // Update local state
-      if (mounted) {
-        setState(() {
-          _taggedWords[tag] = [...(_taggedWords[tag] ?? []), result];
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        showCupertinoDialog(
-          context: context,
-          builder: (_) => CupertinoAlertDialog(
-            title: const Text('Error'),
-            content: Text('Failed to add word: $e'),
-            actions: [
-              CupertinoDialogAction(
-                child: const Text('OK'),
-                onPressed: () => Navigator.pop(context),
-              ),
-            ],
-          ),
-        );
-      }
-    }
   }
 
   @override

@@ -1,6 +1,9 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
+import 'package:permission_handler/permission_handler.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import '../utils/mic_permission.dart' as mic_perm;
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:string_similarity/string_similarity.dart';
@@ -10,7 +13,6 @@ import '../services/asset_service.dart';
 import '../services/ai_service.dart' show sendFlashcardFeedback;
 import 'settings.dart'; // added
 import 'optimization.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 class SelectedCard {
   final String word;
@@ -24,7 +26,7 @@ class MyHomePage extends StatefulWidget {
   State<MyHomePage> createState() => _MyHomePageState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
+class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   final TextEditingController caregiverInputController =
       TextEditingController();
   final List<SelectedCard> selected = [];
@@ -43,7 +45,6 @@ class _MyHomePageState extends State<MyHomePage> {
   // AI generation state
   final FlashcardService _flashcardService = FlashcardService();
   bool _loadingGeneration = false;
-  bool _generating = false;
   List<GeneratedFlashcard> _generated = [];
   Map<String, String> _preMapped = {}; // word -> filename
   List<String> _availableFilenames = [];
@@ -53,6 +54,7 @@ class _MyHomePageState extends State<MyHomePage> {
   List<GeneratedFlashcard> _favoriteCards = [];
 
   int _genToken = 0;
+  // debug status removed from UI
 
   GeneratedFlashcard? _findGeneratedByWord(String word) {
     try {
@@ -120,10 +122,119 @@ class _MyHomePageState extends State<MyHomePage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _speech = stt.SpeechToText();
     _tts = FlutterTts();
     _configureTts();
-    _loadAssets().then((_) => _initFavorites());
+    _loadAssets()
+        .then((_) => _initFavorites())
+        .then((_) => _refreshMicStatus());
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.resumed) {
+      _checkPermissionOnResume();
+    }
+  }
+
+  Future<void> _checkPermissionOnResume() async {
+    try {
+      if (kIsWeb) {
+        // On web, permission_handler may not be available; try to initialize speech directly
+        try {
+          final available = await _speech.initialize();
+          print(
+            'Speech initialized on resume (web): available=$available, hasPermission=${_speech.hasPermission}',
+          );
+          if (mounted)
+            setState(() {
+              // debug status intentionally not shown in UI
+            });
+        } catch (e) {
+          print('Speech init error on resume (web): $e');
+        }
+        return;
+      }
+
+      final status = await Permission.microphone.status;
+      // no-op
+      // ignore: avoid_print
+      print('Permission on resume: $status');
+      if (status.isGranted) {
+        try {
+          final available = await _speech.initialize();
+          // ignore: avoid_print
+          print(
+            'Speech initialized on resume: available=$available, hasPermission=${_speech.hasPermission}',
+          );
+          // update UI status (show concise status)
+          if (mounted)
+            setState(() {
+              // debug status intentionally not shown in UI
+            });
+        } catch (e) {
+          // ignore: avoid_print
+          print('Speech init error on resume: $e');
+        }
+      }
+    } catch (e) {
+      // ignore: avoid_print
+      print('Error checking permission on resume: $e');
+    }
+  }
+
+  Future<void> _refreshMicStatus() async {
+    try {
+      if (kIsWeb) {
+        // permission_handler isn't reliable on web; attempt speech plugin init
+        try {
+          final available = await _speech.initialize();
+          final hasPermission = _speech.hasPermission == true;
+          final msg =
+              'Permission: web, hasPerm:${hasPermission ? 'yes' : 'no'}, initialized:${available ? 'yes' : 'no'}';
+          print('Microphone status refresh (web): $msg');
+          if (mounted)
+            setState(() {
+              // debug status intentionally not shown in UI
+            });
+        } catch (e) {
+          print('Failed to refresh mic status (web): $e');
+          if (mounted)
+            setState(() {
+              // keep UI clean; don't surface debug status
+            });
+        }
+        return;
+      }
+
+      final status = await Permission.microphone.status;
+      final hasPermission = _speech.hasPermission == true;
+      final initialized = _speech.isAvailable;
+      final msg =
+          'Permission: ${status.toString().split('.').last}, hasPerm:${hasPermission ? 'yes' : 'no'}, initialized:${initialized ? 'yes' : 'no'}';
+      // ignore: avoid_print
+      print('Microphone status refresh: $msg');
+      // Keep UI clean; do not display debug status
+      if (mounted)
+        setState(() {
+          // no-op
+        });
+    } catch (e) {
+      // ignore: avoid_print
+      print('Failed to refresh mic status: $e');
+      if (mounted)
+        setState(() {
+          // do not surface debug status
+        });
+    }
   }
 
   Future<void> _configureTts() async {
@@ -143,6 +254,8 @@ class _MyHomePageState extends State<MyHomePage> {
 
   Future<void> _loadAssets() async {
     try {
+      // Initialize AssetService index and load available filenames
+      await AssetService.instance.init();
       final files = await AssetService.listSymbolFilenames(); // fixed
       if (mounted) {
         setState(() => _availableFilenames = files);
@@ -180,7 +293,7 @@ class _MyHomePageState extends State<MyHomePage> {
     }
   }
 
-  bool _isFavorite(String id) => _favoriteIds.contains(id);
+  // helper to check favorites is available via _favoriteIds set
 
   Future<void> _toggleFavorite(GeneratedFlashcard card) async {
     final wasFav = _favoriteIds.contains(card.id);
@@ -251,13 +364,46 @@ class _MyHomePageState extends State<MyHomePage> {
       final mapping = <String, String>{};
       for (final c in cards) {
         if (c.assetFilename != null) {
-          mapping[c.answer] = c.assetFilename!;
+          final af = c.assetFilename!;
+          // Prefer backend filename only if it's available locally; otherwise
+          // try to resolve to a full asset path via AssetService.lookup
+          if (_availableFilenames.contains(af)) {
+            mapping[c.answer] = af;
+          } else {
+            final base = af.replaceAll(
+              RegExp(r'\.svg$', caseSensitive: false),
+              '',
+            );
+            try {
+              final resolved = await AssetService.instance.lookup(base);
+              if (resolved != null) {
+                mapping[c.answer] = resolved; // full path
+              } else {
+                // fallback to backend-provided name (may still fail)
+                mapping[c.answer] = af;
+              }
+            } catch (_) {
+              mapping[c.answer] = af;
+            }
+          }
         }
       }
       // Also add favorite cards to mapping
       for (final c in _favoriteCards) {
         if (c.assetFilename != null) {
-          mapping[c.answer] = c.assetFilename!;
+          final af = c.assetFilename!;
+          if (_availableFilenames.contains(af)) {
+            mapping[c.answer] = af;
+          } else {
+            final base = af.replaceAll(
+              RegExp(r'\.svg$', caseSensitive: false),
+              '',
+            );
+            try {
+              final resolved = await AssetService.instance.lookup(base);
+              if (resolved != null) mapping[c.answer] = resolved;
+            } catch (_) {}
+          }
         }
       }
 
@@ -394,10 +540,14 @@ class _MyHomePageState extends State<MyHomePage> {
 
   // Placeholder: open AI optimization screen or perform action
   void _openAiOptimization() {
-    // Navigate to the OptimizationPage so user can manage tags & favorites
-    Navigator.of(
-      context,
-    ).push(CupertinoPageRoute(builder: (_) => const OptimizationPage()));
+    // Navigate to the OptimizationPage and refresh favorites on return
+    () async {
+      await Navigator.of(
+        context,
+      ).push(CupertinoPageRoute(builder: (_) => const OptimizationPage()));
+      // After returning from optimization screen, refresh favorites so Home shows updates immediately
+      await _initFavorites();
+    }();
   }
 
   String? _findBestFilename(String word) {
@@ -432,50 +582,242 @@ class _MyHomePageState extends State<MyHomePage> {
       if (mounted) setState(() => _isListening = false);
       return;
     }
-    bool available = await _speech.initialize(
-      onStatus: (val) {
-        if (mounted) setState(() => _isListening = val == 'listening');
-        if (val == 'done' || val == 'notListening') {
-          if (mounted) setState(() => _isListening = false);
-          final text = caregiverInputController.text.trim();
-          if (text.length >= 3) {
-            _generateFromInput();
-          }
-        }
-      },
-      onError: (val) {
-        if (mounted) setState(() => _isListening = false);
-      },
-    );
-    if (!available || _speech.hasPermission != true) {
-      // was: await _speech.hasPermission
-      if (mounted) {
-        showCupertinoDialog(
-          context: context,
-          builder: (_) => CupertinoAlertDialog(
-            title: const Text('Microphone Permission'),
-            content: const Text('Microphone access is required.'),
-            actions: [
-              CupertinoDialogAction(
-                child: const Text('OK'),
-                onPressed: () => Navigator.of(context).pop(),
+
+    // Explicitly check/request microphone permission using permission_handler.
+    try {
+      if (kIsWeb) {
+        // On web, ask the browser for microphone access which will trigger
+        // the browser permission prompt (Chrome/Edge/Firefox will show the mic popup).
+        final granted = await mic_perm.requestBrowserMic();
+        if (!granted) {
+          if (mounted) {
+            showCupertinoDialog(
+              context: context,
+              builder: (_) => CupertinoAlertDialog(
+                title: const Text('Microphone Permission'),
+                content: const Text(
+                  'Please allow microphone access in your browser.',
+                ),
+                actions: [
+                  CupertinoDialogAction(
+                    child: const Text('OK'),
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                ],
               ),
-            ],
-          ),
+            );
+          }
+          return;
+        }
+
+        // If the browser granted access, try initializing the speech plugin.
+        bool available = false;
+        try {
+          available = await _speech.initialize(
+            onStatus: (val) {
+              if (mounted) setState(() => _isListening = val == 'listening');
+              if (val == 'done' || val == 'notListening') {
+                if (mounted) setState(() => _isListening = false);
+                final text = caregiverInputController.text.trim();
+                if (text.length >= 3) {
+                  _generateFromInput();
+                }
+              }
+            },
+            onError: (val) {
+              if (mounted) setState(() => _isListening = false);
+              print('Speech onError (web): $val');
+            },
+          );
+        } catch (e) {
+          print('Speech initialize error on web after grant: $e');
+        }
+
+        if (!available) {
+          if (mounted) {
+            showCupertinoDialog(
+              context: context,
+              builder: (_) => CupertinoAlertDialog(
+                title: const Text('Microphone Error'),
+                content: const Text(
+                  'Could not initialize speech recognition in the browser.',
+                ),
+                actions: [
+                  CupertinoDialogAction(
+                    child: const Text('OK'),
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                ],
+              ),
+            );
+          }
+          return;
+        }
+
+        if (mounted) setState(() => _isListening = true);
+        _speech.listen(
+          onResult: (val) {
+            if (!mounted) return;
+            caregiverInputController.text = val.recognizedWords;
+            caregiverInputController.selection = TextSelection.fromPosition(
+              TextPosition(offset: caregiverInputController.text.length),
+            );
+          },
         );
+        return;
       }
-      return;
-    }
-    setState(() => _isListening = true);
-    _speech.listen(
-      onResult: (val) {
-        if (!mounted) return;
-        caregiverInputController.text = val.recognizedWords;
-        caregiverInputController.selection = TextSelection.fromPosition(
-          TextPosition(offset: caregiverInputController.text.length),
+      // ensure we have an up-to-date status before proceeding
+      await _refreshMicStatus();
+
+      var status = await Permission.microphone.status;
+      if (!status.isGranted) {
+        status = await Permission.microphone.request();
+      }
+
+      if (status.isPermanentlyDenied) {
+        // Show dialog with option to open app settings
+        if (mounted) {
+          showCupertinoDialog(
+            context: context,
+            builder: (_) => CupertinoAlertDialog(
+              title: const Text('Microphone Permission'),
+              content: const Text(
+                'Microphone access is required. Please enable it in app settings.',
+              ),
+              actions: [
+                CupertinoDialogAction(
+                  child: const Text('Open Settings'),
+                  onPressed: () {
+                    openAppSettings();
+                    Navigator.of(context).pop();
+                  },
+                ),
+                CupertinoDialogAction(
+                  child: const Text('Cancel'),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ],
+            ),
+          );
+        }
+        return;
+      }
+
+      // At this point, if granted, try to initialize the speech plugin.
+      // Sometimes the OS permission is granted but the plugin hasn't registered permission yet.
+      if (status.isGranted) {
+        bool available = false;
+        try {
+          available = await _speech.initialize(
+            onStatus: (val) {
+              if (mounted) setState(() => _isListening = val == 'listening');
+              if (val == 'done' || val == 'notListening') {
+                if (mounted) setState(() => _isListening = false);
+                final text = caregiverInputController.text.trim();
+                if (text.length >= 3) {
+                  _generateFromInput();
+                }
+              }
+            },
+            onError: (val) {
+              if (mounted) setState(() => _isListening = false);
+              // log error, keep UI non-alarming
+              print('Speech onError: $val');
+            },
+          );
+        } catch (e) {
+          print('Speech initialize error after grant: $e');
+        }
+
+        if (!available) {
+          // If we couldn't initialize after permission was granted, show a helpful message
+          if (mounted) {
+            showCupertinoDialog(
+              context: context,
+              builder: (_) => CupertinoAlertDialog(
+                title: const Text('Microphone Error'),
+                content: const Text(
+                  'Could not initialize speech recognition. Try restarting the app or checking OS settings.',
+                ),
+                actions: [
+                  CupertinoDialogAction(
+                    child: const Text('OK'),
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                ],
+              ),
+            );
+          }
+          // update internal state quietly (do not surface debug status)
+          if (mounted)
+            setState(() {
+              // no-op
+            });
+          return;
+        }
+
+        // Good — start listening
+        if (mounted) setState(() => _isListening = true);
+        _speech.listen(
+          onResult: (val) {
+            if (!mounted) return;
+            caregiverInputController.text = val.recognizedWords;
+            caregiverInputController.selection = TextSelection.fromPosition(
+              TextPosition(offset: caregiverInputController.text.length),
+            );
+          },
         );
-      },
-    );
+        return;
+      }
+    } catch (e) {
+      // Fallback: if permission_handler isn't available or errors occur, try original flow
+      // ignore: avoid_print
+      print('Permission check error: $e');
+      // try initialize anyway
+      bool available = await _speech.initialize(
+        onStatus: (val) {
+          if (mounted) setState(() => _isListening = val == 'listening');
+          if (val == 'done' || val == 'notListening') {
+            if (mounted) setState(() => _isListening = false);
+            final text = caregiverInputController.text.trim();
+            if (text.length >= 3) {
+              _generateFromInput();
+            }
+          }
+        },
+        onError: (val) {
+          if (mounted) setState(() => _isListening = false);
+        },
+      );
+      if (!available || _speech.hasPermission != true) {
+        if (mounted) {
+          showCupertinoDialog(
+            context: context,
+            builder: (_) => CupertinoAlertDialog(
+              title: const Text('Microphone Permission'),
+              content: const Text('Microphone access is required.'),
+              actions: [
+                CupertinoDialogAction(
+                  child: const Text('OK'),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ],
+            ),
+          );
+        }
+        return;
+      }
+      setState(() => _isListening = true);
+      _speech.listen(
+        onResult: (val) {
+          if (!mounted) return;
+          caregiverInputController.text = val.recognizedWords;
+          caregiverInputController.selection = TextSelection.fromPosition(
+            TextPosition(offset: caregiverInputController.text.length),
+          );
+        },
+      );
+    }
   }
 
   // immediate speak for taps/keyboard (stops current and speaks right away)
@@ -505,9 +847,24 @@ class _MyHomePageState extends State<MyHomePage> {
     await _speakNow(sentence);
   }
 
+  // Get words sorted with favorites first, then generated (no duplicates)
   // called when a flashcard is tapped
   Future<void> _onFlashcardTap(String word) async {
-    final filename = _findBestFilename(word);
+    // ✅ Find the card to get its backend-matched assetFilename
+    final card = [..._favoriteCards, ..._generated].firstWhere(
+      (c) => c.answer == word,
+      orElse: () => GeneratedFlashcard(
+        id: '',
+        question: '',
+        answer: word,
+        tags: [],
+        assetFilename: null,
+      ),
+    );
+
+    // Use the card's assetFilename (from backend) instead of re-matching
+    final filename = card.assetFilename ?? _findBestFilename(word);
+
     setState(() {
       selected.add(SelectedCard(word, filename));
     });
@@ -529,7 +886,6 @@ class _MyHomePageState extends State<MyHomePage> {
     await _toggleFavorite(card);
   }
 
-  // Get words sorted with favorites first, then generated (no duplicates)
   List<String> _getSortedWords() {
     // Get favorite words that aren't in current generation
     final generatedAnswers = _generated
@@ -720,6 +1076,8 @@ class _MyHomePageState extends State<MyHomePage> {
                 ],
               ),
             ),
+
+            // mic debug UI removed per user request
 
             // output box with compact cards and controls
             Padding(
