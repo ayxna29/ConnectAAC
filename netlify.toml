@@ -1,7 +1,7 @@
 [build]
-  base = "."
-  publish = "dist"
-  command = "npm run build"
+  base = "."              # your repo root is the Flutter folder
+  publish = "build/web"   # Flutter outputs the web files here
+  command = "flutter build web"
 
 [build.environment]
   VITE_API_URL = "https://connectaac.onrender.com"
