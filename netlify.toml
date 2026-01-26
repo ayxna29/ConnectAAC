@@ -1,5 +1,5 @@
 [build]
-  base = "app/AAC"
+  base = "."
   publish = "dist"
   command = "npm run build"
 
