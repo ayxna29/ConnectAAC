@@ -539,15 +539,13 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   }
 
   // Placeholder: open AI optimization screen or perform action
-  void _openAiOptimization() {
+  Future<void> _openAiOptimization() async {
     // Navigate to the OptimizationPage and refresh favorites on return
-    () async {
-      await Navigator.of(
-        context,
-      ).push(CupertinoPageRoute(builder: (_) => const OptimizationPage()));
-      // After returning from optimization screen, refresh favorites so Home shows updates immediately
-      await _initFavorites();
-    }();
+    await Navigator.of(
+      context,
+    ).push(CupertinoPageRoute(builder: (_) => const OptimizationPage()));
+    // After returning from optimization screen, refresh favorites so Home shows updates immediately
+    await _initFavorites();
   }
 
   String? _findBestFilename(String word) {
@@ -655,17 +653,25 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
         }
 
         if (mounted) setState(() => _isListening = true);
-        _speech.listen(
-          onResult: (val) {
-            if (!mounted) return;
-            caregiverInputController.text = val.recognizedWords;
-            caregiverInputController.selection = TextSelection.fromPosition(
-              TextPosition(offset: caregiverInputController.text.length),
-            );
-          },
-        );
+        try {
+          _speech.listen(
+            onResult: (val) {
+              if (!mounted) return;
+              caregiverInputController.text = val.recognizedWords;
+              caregiverInputController.selection = TextSelection.fromPosition(
+                TextPosition(offset: caregiverInputController.text.length),
+              );
+            },
+            cancelOnError: true,
+          );
+        } catch (err) {
+          if (mounted) setState(() => _isListening = false);
+          print('Speech listen error (web): $err');
+        }
         return;
       }
+
+      // Non-web path: native mobile platforms
       // ensure we have an up-to-date status before proceeding
       await _refreshMicStatus();
 
@@ -703,30 +709,31 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
         return;
       }
 
-      // At this point, if granted, try to initialize the speech plugin.
-      // Sometimes the OS permission is granted but the plugin hasn't registered permission yet.
+      // At this point, if granted, try to initialize the speech plugin once.
+      // Only initialize if not already initialized to avoid conflicts.
       if (status.isGranted) {
-        bool available = false;
-        try {
-          available = await _speech.initialize(
-            onStatus: (val) {
-              if (mounted) setState(() => _isListening = val == 'listening');
-              if (val == 'done' || val == 'notListening') {
-                if (mounted) setState(() => _isListening = false);
-                final text = caregiverInputController.text.trim();
-                if (text.length >= 3) {
-                  _generateFromInput();
+        bool available = _speech.isAvailable;
+        if (!available) {
+          try {
+            available = await _speech.initialize(
+              onStatus: (val) {
+                if (mounted) setState(() => _isListening = val == 'listening');
+                if (val == 'done' || val == 'notListening') {
+                  if (mounted) setState(() => _isListening = false);
+                  final text = caregiverInputController.text.trim();
+                  if (text.length >= 3) {
+                    _generateFromInput();
+                  }
                 }
-              }
-            },
-            onError: (val) {
-              if (mounted) setState(() => _isListening = false);
-              // log error, keep UI non-alarming
-              print('Speech onError: $val');
-            },
-          );
-        } catch (e) {
-          print('Speech initialize error after grant: $e');
+              },
+              onError: (val) {
+                if (mounted) setState(() => _isListening = false);
+                print('Speech onError: $val');
+              },
+            );
+          } catch (e) {
+            print('Speech initialize error after grant: $e');
+          }
         }
 
         if (!available) {
@@ -748,47 +755,58 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
               ),
             );
           }
-          // update internal state quietly (do not surface debug status)
-          if (mounted)
-            setState(() {
-              // no-op
-            });
+          if (mounted) setState(() => _isListening = false);
           return;
         }
 
         // Good — start listening
         if (mounted) setState(() => _isListening = true);
-        _speech.listen(
-          onResult: (val) {
-            if (!mounted) return;
-            caregiverInputController.text = val.recognizedWords;
-            caregiverInputController.selection = TextSelection.fromPosition(
-              TextPosition(offset: caregiverInputController.text.length),
-            );
-          },
-        );
+        try {
+          _speech.listen(
+            onResult: (val) {
+              if (!mounted) return;
+              caregiverInputController.text = val.recognizedWords;
+              caregiverInputController.selection = TextSelection.fromPosition(
+                TextPosition(offset: caregiverInputController.text.length),
+              );
+            },
+            cancelOnError: true,
+          );
+        } catch (err) {
+          if (mounted) setState(() => _isListening = false);
+          print('Speech listen error: $err');
+        }
         return;
       }
     } catch (e) {
       // Fallback: if permission_handler isn't available or errors occur, try original flow
-      // ignore: avoid_print
       print('Permission check error: $e');
-      // try initialize anyway
-      bool available = await _speech.initialize(
-        onStatus: (val) {
-          if (mounted) setState(() => _isListening = val == 'listening');
-          if (val == 'done' || val == 'notListening') {
-            if (mounted) setState(() => _isListening = false);
-            final text = caregiverInputController.text.trim();
-            if (text.length >= 3) {
-              _generateFromInput();
-            }
-          }
-        },
-        onError: (val) {
-          if (mounted) setState(() => _isListening = false);
-        },
-      );
+
+      // Check if already initialized
+      bool available = _speech.isAvailable;
+      if (!available) {
+        try {
+          available = await _speech.initialize(
+            onStatus: (val) {
+              if (mounted) setState(() => _isListening = val == 'listening');
+              if (val == 'done' || val == 'notListening') {
+                if (mounted) setState(() => _isListening = false);
+                final text = caregiverInputController.text.trim();
+                if (text.length >= 3) {
+                  _generateFromInput();
+                }
+              }
+            },
+            onError: (val) {
+              if (mounted) setState(() => _isListening = false);
+              print('Speech fallback onError: $val');
+            },
+          );
+        } catch (initErr) {
+          print('Fallback initialization error: $initErr');
+        }
+      }
+
       if (!available || _speech.hasPermission != true) {
         if (mounted) {
           showCupertinoDialog(
@@ -807,16 +825,23 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
         }
         return;
       }
-      setState(() => _isListening = true);
-      _speech.listen(
-        onResult: (val) {
-          if (!mounted) return;
-          caregiverInputController.text = val.recognizedWords;
-          caregiverInputController.selection = TextSelection.fromPosition(
-            TextPosition(offset: caregiverInputController.text.length),
-          );
-        },
-      );
+
+      if (mounted) setState(() => _isListening = true);
+      try {
+        _speech.listen(
+          onResult: (val) {
+            if (!mounted) return;
+            caregiverInputController.text = val.recognizedWords;
+            caregiverInputController.selection = TextSelection.fromPosition(
+              TextPosition(offset: caregiverInputController.text.length),
+            );
+          },
+          cancelOnError: true,
+        );
+      } catch (err) {
+        if (mounted) setState(() => _isListening = false);
+        print('Speech listen error (fallback): $err');
+      }
     }
   }
 

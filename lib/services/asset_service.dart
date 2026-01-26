@@ -15,7 +15,7 @@ class AssetService {
     final Map<String, dynamic> manifest = json.decode(manifestJson);
     const prefix = 'assets/mulberry-symbols/EN-symbols/';
     for (final path in manifest.keys) {
-      if (path is String && path.startsWith(prefix) && path.endsWith('.svg')) {
+      if (path.startsWith(prefix) && path.endsWith('.svg')) {
         final name = path
             .substring(prefix.length, path.length - 4)
             .toLowerCase(); // drop ".svg"

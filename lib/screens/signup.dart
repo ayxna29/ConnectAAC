@@ -77,14 +77,27 @@ class _SignupPageState extends State<SignupPage> {
       final user = authResponse.user;
       if (user == null) throw Exception('User not created');
 
-      await supabase.from('users').insert({
-        'id': user.id,
-        'name': nameController.text.trim(),
-        'role': selectedRole,
-        'caregiver_pin': selectedRole == 'Parent/Guardian'
-            ? caregiverCodeController.text.trim()
-            : null,
-      });
+      // Try to create a profile row; if RLS blocks it, continue signup gracefully.
+      try {
+        await supabase.from('users').insert({
+          'id': user.id,
+          'name': nameController.text.trim(),
+          'role': selectedRole,
+          'caregiver_pin': selectedRole == 'Parent/Guardian'
+              ? caregiverCodeController.text.trim()
+              : null,
+        });
+      } catch (e) {
+        final msg = e.toString();
+        // Ignore row-level security (RLS) permission errors and proceed.
+        if (msg.contains('row-level security') || msg.contains('42501')) {
+          // Log for diagnostics but do not block account creation
+          // ignore: avoid_print
+          print('RLS blocked users insert; continuing signup: $msg');
+        } else {
+          rethrow; // surface unexpected errors
+        }
+      }
 
       showCupertinoDialog(
         context: context,
