@@ -7,11 +7,10 @@ import 'screens/home.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized(); // Ensure bindings initialized
-  final supabaseUrl = kIsWeb
-      ? '/supabase' // proxied via _redirects on Netlify
-      : 'https://joerjjtiwctzdbcynnar.supabase.co';
+  // Always use the direct Supabase URL, never proxy through the frontend.
+  // This ensures auth requests go to Supabase, not to the frontend server.
   await Supabase.initialize(
-    url: supabaseUrl,
+    url: 'https://joerjjtiwctzdbcynnar.supabase.co',
     anonKey: 'sb_publishable_78ZUvr1qtfV9aq0qErtIuA_nABUte5B',
   );
   runApp(const MyApp());
