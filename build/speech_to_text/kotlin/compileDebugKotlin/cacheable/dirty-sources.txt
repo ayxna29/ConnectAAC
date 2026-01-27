@@ -1,0 +1,1 @@
+C:\Users\ay_an\AppData\Local\Pub\Cache\hosted\pub.dev\speech_to_text-6.6.2\android\src\main\kotlin\com\csdcorp\speech_to_text\SpeechToTextPlugin.kt
