@@ -6,7 +6,12 @@ final _supabase = Supabase.instance.client;
 
 /// Change to 'http://localhost:5000' for desktop/emulator,
 /// or your ngrok URL when testing on a physical device.
-const String _apiBase = 'http://localhost:5000';
+/// Use compile-time environment `API_URL` with a sensible default.
+/// For local emulators override with `--dart-define=API_URL=http://localhost:5000` when building.
+const String _apiBase = const String.fromEnvironment(
+  'API_URL',
+  defaultValue: 'https://connectaac.onrender.com',
+);
 
 Future<List<Map<String, dynamic>>> generateFlashcardsFromAI(
   String context, {

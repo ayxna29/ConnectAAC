@@ -53,7 +53,12 @@ class FavoriteCard {
 }
 
 class FlashcardService {
-  FlashcardService({this.backendBaseUrl = 'http://localhost:5000'});
+  FlashcardService({
+    this.backendBaseUrl = const String.fromEnvironment(
+      'API_URL',
+      defaultValue: 'https://connectaac.onrender.com',
+    ),
+  });
 
   final String backendBaseUrl;
   final _supabase = Supabase.instance.client;

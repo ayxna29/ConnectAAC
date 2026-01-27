@@ -22,7 +22,10 @@ class _OptimizationPageState extends State<OptimizationPage> {
   final supabase = Supabase.instance.client;
 
   // Backend URL used for optimization endpoints. Keep in sync with FlashcardService default.
-  final String backendBaseUrl = 'http://localhost:5000';
+  final String backendBaseUrl = const String.fromEnvironment(
+    'API_URL',
+    defaultValue: 'https://connectaac.onrender.com',
+  );
 
   bool _loading = false;
 
