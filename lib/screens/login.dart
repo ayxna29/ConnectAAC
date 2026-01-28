@@ -17,47 +17,109 @@ class _LoginPageState extends State<LoginPage> {
     setState(() => isLoading = true);
     try {
       final supabase = Supabase.instance.client;
+
       final response = await supabase.auth.signInWithPassword(
         email: emailController.text.trim(),
         password: passwordController.text.trim(),
       );
 
-      if (response.user == null) {
-        throw Exception("Login failed. User not found.");
+      // Check for a real session/user
+      if (response.session == null || response.user == null) {
+        // Wrong email/password - show user-friendly error
+        if (mounted) {
+          showCupertinoDialog(
+            context: context,
+            builder: (_) => CupertinoAlertDialog(
+              title: const Text("Login Failed"),
+              content: const Text(
+                "Invalid email or password. Please try again.",
+              ),
+              actions: [
+                CupertinoDialogAction(
+                  child: const Text("OK"),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ],
+            ),
+          );
+        }
+        return;
       }
 
-      showCupertinoDialog(
-        context: context,
-        builder: (_) => CupertinoAlertDialog(
-          title: const Text("Success"),
-          content: const Text("Logged in successfully."),
-          actions: [
-            CupertinoDialogAction(
-              child: const Text("Continue"),
-              onPressed: () {
-                Navigator.of(context).pop();
-                Navigator.of(context).pushReplacementNamed('/home');
-              },
+      // Success - navigate to home
+      if (mounted) {
+        showCupertinoDialog(
+          context: context,
+          builder: (_) => CupertinoAlertDialog(
+            title: const Text("Success"),
+            content: const Text("Logged in successfully."),
+            actions: [
+              CupertinoDialogAction(
+                child: const Text("Continue"),
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  Navigator.of(context).pushReplacementNamed('/home');
+                },
+              ),
+            ],
+          ),
+        );
+      }
+    } on AuthException catch (e) {
+      // Supabase auth error (bad credentials, etc.)
+      if (mounted) {
+        showCupertinoDialog(
+          context: context,
+          builder: (_) => CupertinoAlertDialog(
+            title: const Text("Authentication Error"),
+            content: Text(e.message),
+            actions: [
+              CupertinoDialogAction(
+                child: const Text("OK"),
+                onPressed: () => Navigator.of(context).pop(),
+              ),
+            ],
+          ),
+        );
+      }
+    } on AuthRetryableFetchException catch (e) {
+      // Network / JSON / fetch error
+      if (mounted) {
+        showCupertinoDialog(
+          context: context,
+          builder: (_) => CupertinoAlertDialog(
+            title: const Text("Network Error"),
+            content: const Text(
+              "Unable to connect to authentication service. Please check your internet connection and try again.",
             ),
-          ],
-        ),
-      );
+            actions: [
+              CupertinoDialogAction(
+                child: const Text("OK"),
+                onPressed: () => Navigator.of(context).pop(),
+              ),
+            ],
+          ),
+        );
+      }
     } catch (e) {
-      showCupertinoDialog(
-        context: context,
-        builder: (_) => CupertinoAlertDialog(
-          title: const Text("Login Error"),
-          content: Text(e.toString()),
-          actions: [
-            CupertinoDialogAction(
-              child: const Text("OK"),
-              onPressed: () => Navigator.of(context).pop(),
-            ),
-          ],
-        ),
-      );
+      // Any other unexpected error
+      if (mounted) {
+        showCupertinoDialog(
+          context: context,
+          builder: (_) => CupertinoAlertDialog(
+            title: const Text("Login Error"),
+            content: Text("An unexpected error occurred: ${e.toString()}"),
+            actions: [
+              CupertinoDialogAction(
+                child: const Text("OK"),
+                onPressed: () => Navigator.of(context).pop(),
+              ),
+            ],
+          ),
+        );
+      }
     } finally {
-      setState(() => isLoading = false);
+      if (mounted) setState(() => isLoading = false);
     }
   }
 
