@@ -92,7 +92,7 @@ class FlashcardGrid extends StatelessWidget {
             final word = entry.key;
             final filename = entry.value; // may be null
             final assetPath = (filename != null)
-                ? 'assets/mulberry-symbols/EN-symbols/$filename'
+                ? 'mulberry-symbols/EN-symbols/$filename'
                 : null;
             final cardId = wordToCardId?[word]; // get card ID for this word
             final isFavorite =

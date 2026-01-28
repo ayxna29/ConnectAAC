@@ -65,7 +65,9 @@ class _OptimizationPageState extends State<OptimizationPage> {
     setState(() => _loading = true);
     try {
       await _loadTags();
-      await _loadFlashcards();
+      // Commented out: _loadFlashcards() was causing Supabase REST 400 error.
+      // Flashcard data comes from backend API endpoints instead.
+      // await _loadFlashcards();
       await _loadFavorites();
     } catch (e) {
       // ignore for UI demo

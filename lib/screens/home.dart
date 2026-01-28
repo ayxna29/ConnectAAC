@@ -126,9 +126,9 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     _speech = stt.SpeechToText();
     _tts = FlutterTts();
     _configureTts();
-    _loadAssets()
-        .then((_) => _initFavorites())
-        .then((_) => _refreshMicStatus());
+    _loadAssets().then((_) => _initFavorites());
+    // Do NOT initialize speech plugin on app load to avoid early permission prompts.
+    // The speech plugin will be initialized on-demand when user clicks the mic button.
   }
 
   @override

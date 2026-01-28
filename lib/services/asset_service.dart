@@ -13,7 +13,7 @@ class AssetService {
     if (_initialized) return;
     final manifestJson = await rootBundle.loadString('AssetManifest.json');
     final Map<String, dynamic> manifest = json.decode(manifestJson);
-    const prefix = 'assets/mulberry-symbols/EN-symbols/';
+    const prefix = 'mulberry-symbols/EN-symbols/';
     for (final path in manifest.keys) {
       if (path.startsWith(prefix) && path.endsWith('.svg')) {
         final name = path
@@ -75,7 +75,7 @@ class AssetService {
     return manifestMap.keys
         .where(
           (path) =>
-              path.startsWith('assets/mulberry-symbols/EN-symbols/') &&
+              path.startsWith('mulberry-symbols/EN-symbols/') &&
               path.endsWith('.svg'),
         )
         .map((path) => path.split('/').last)
