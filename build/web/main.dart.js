@@ -45844,7 +45844,7 @@ return A.q($.yJ().Jg("AssetManifest.json"),$async$B9)
 case 3:o=l.aI(k.uc(j.bd(0,b))),n=p.b
 case 4:if(!o.q()){s=5
 break}m=o.gK(o)
-if(B.c.b_(m,"mulberry-symbols/EN-symbols/")&&B.c.iu(m,".svg"))n.l(0,B.c.N(m,28,m.length-4).toLowerCase(),m)
+if(B.c.b_(m,"assets/mulberry-symbols/EN-symbols/")&&B.c.iu(m,".svg"))n.l(0,B.c.N(m,35,m.length-4).toLowerCase(),m)
 s=4
 break
 case 5:p.a=!0
@@ -45875,7 +45875,7 @@ $1(a){var s=a.length
 return s!==0&&s>2},
 $S:19}
 A.a2M.prototype={
-$1(a){return B.c.b_(a,"mulberry-symbols/EN-symbols/")&&B.c.iu(a,".svg")},
+$1(a){return B.c.b_(a,"assets/mulberry-symbols/EN-symbols/")&&B.c.iu(a,".svg")},
 $S:19}
 A.a2N.prototype={
 $1(a){return B.b.ga3(a.split("/"))},
@@ -46069,7 +46069,7 @@ s=s.length
 return new A.vd(new A.akI(p,12,12,1),r,B.jR,B.aA,!1,q,q,B.mz,!1,q,s,B.aN,q,q,B.I,B.aP,q)},
 $S:481}
 A.a7k.prototype={
-$1(a){var s,r,q,p=null,o=a.a,n=a.b,m=n!=null,l=m?"mulberry-symbols/EN-symbols/"+n:p,k=this.a,j=k.y.i(0,o),i=j!=null&&k.f.v(0,j)
+$1(a){var s,r,q,p=null,o=a.a,n=a.b,m=n!=null,l=m?"assets/mulberry-symbols/EN-symbols/"+n:p,k=this.a,j=k.y.i(0,o),i=j!=null&&k.f.v(0,j)
 if(m)k.r.i(0,n)
 m=A.hE(12)
 s=t.p
