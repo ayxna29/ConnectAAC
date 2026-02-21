@@ -137,10 +137,12 @@ class FlashcardService {
       },
       body: json.encode(body),
     );
+    print('🔗 Backend response: statusCode=${resp.statusCode}');
     if (resp.statusCode == 0) {
       throw Exception('No response (network/CORS)');
     }
     if (resp.statusCode != 200) {
+      print('❌ Backend error: ${resp.body}');
       throw Exception('HTTP ${resp.statusCode}: ${resp.body}');
     }
     final Map<String, dynamic> decoded =
@@ -150,6 +152,7 @@ class FlashcardService {
       _lastGenerationId = genId; // store for next avoidance
     }
     final List<dynamic> list = decoded['flashcards'] as List<dynamic>? ?? [];
+    print('📊 Parsed ${list.length} flashcards from response');
     final cards = list
         .map((e) {
           final m = e as Map<String, dynamic>;

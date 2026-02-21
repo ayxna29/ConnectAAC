@@ -367,8 +367,13 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
 
     try {
       final token = ++_genToken;
+      print('🚀 Generating cards with token=$token for input: "$input"');
       final cards = await _flashcardService.generate(caregiverInput: input);
-      if (token != _genToken) return;
+      print('✅ Got ${cards.length} cards (token=$token vs current=$_genToken)');
+      if (token != _genToken) {
+        print('⚠️ Token mismatch, discarding results');
+        return;
+      }
 
       final mapping = <String, String>{};
       for (final c in cards) {

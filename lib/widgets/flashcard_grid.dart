@@ -93,7 +93,7 @@ class FlashcardGrid extends StatelessWidget {
             final filename = entry.value; // may be null
             final assetPath = (filename != null)
                 ? 'assets/mulberry-symbols/EN-symbols/$filename'
-                : 'assets/mulberry-symbols/EN-symbols/blank.svg'; // ✅ Use full path for blank.svg fallback
+                : null; // ✅ No asset if symbol doesn't match
             final cardId = wordToCardId?[word]; // get card ID for this word
             final isFavorite =
                 cardId != null &&
@@ -130,17 +130,34 @@ class FlashcardGrid extends StatelessWidget {
                             child: Center(
                               child: SizedBox(
                                 width: double.infinity,
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 8.0,
-                                    horizontal: 8.0,
-                                  ),
-                                  child: SafeSvg(
-                                    assetPath: assetPath,
-                                    fit: BoxFit.contain,
-                                    height: 120,
-                                  ),
-                                ),
+                                child: assetPath != null
+                                    ? Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          vertical: 8.0,
+                                          horizontal: 8.0,
+                                        ),
+                                        child: SafeSvg(
+                                          assetPath: assetPath,
+                                          fit: BoxFit.contain,
+                                          height: 120,
+                                        ),
+                                      )
+                                    : Container(
+                                        height: 120,
+                                        decoration: BoxDecoration(
+                                          color: Colors.grey.shade100,
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
+                                        ),
+                                        child: const Center(
+                                          child: Icon(
+                                            Icons.help_outline,
+                                            size: 48,
+                                            color: Colors.black26,
+                                          ),
+                                        ),
+                                      ),
                               ),
                             ),
                           ),
