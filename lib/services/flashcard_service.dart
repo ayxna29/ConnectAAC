@@ -4,6 +4,13 @@ import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'asset_service.dart';
 
+String? normalizeAssetFilename(String? raw) {
+  if (raw == null) return null;
+  final cleaned = raw.replaceAll('\\', '/').trim();
+  if (cleaned.isEmpty) return null;
+  return cleaned.split('/').last;
+}
+
 /// Simple model for generated flashcards consumed by UI
 class GeneratedFlashcard {
   final String id;
@@ -38,7 +45,9 @@ class FavoriteCard {
       id: (json['id'] ?? '').toString(),
       question: (json['question'] ?? '').toString(),
       answer: (json['answer'] ?? '').toString(),
-      assetFilename: (json['asset_filename'] ?? 'blank.svg').toString(),
+      assetFilename:
+          normalizeAssetFilename(json['asset_filename']?.toString()) ??
+          'blank.svg',
     );
   }
 
@@ -80,7 +89,7 @@ class FlashcardService {
     _availableSymbolsCache = await AssetService.listSymbolFilenames(); // fixed
   }
 
-  /// Generate 15 flashcards from backend given caregiver context.
+  /// Generate 30 flashcards from backend given caregiver context.
   /// - Prefers short & medium answers (mixed distribution handled server-side)
   /// - Avoids previous generation's IDs for novelty
   /// - Optionally merges favorites (caller can handle UI ordering)
@@ -151,8 +160,9 @@ class FlashcardService {
             tags: (m['tags'] as List<dynamic>? ?? [])
                 .map((t) => t.toString())
                 .toList(),
-            assetFilename: m['asset_filename']
-                ?.toString(), // ✅ Read from backend
+            assetFilename: normalizeAssetFilename(
+              m['asset_filename']?.toString(),
+            ), // ✅ normalize backend value
           );
         })
         .where((c) => c.answer.isNotEmpty)

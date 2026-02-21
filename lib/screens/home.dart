@@ -265,6 +265,13 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     }
   }
 
+  String? _normalizeAssetFilename(String? raw) {
+    if (raw == null) return null;
+    final cleaned = raw.replaceAll('\\', '/').trim();
+    if (cleaned.isEmpty) return null;
+    return cleaned.split('/').last;
+  }
+
   Future<void> _initFavorites() async {
     try {
       final favs = await _flashcardService.fetchFavorites();
@@ -283,7 +290,9 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
               question: f.question,
               answer: f.answer,
               tags: const [],
-              assetFilename: f.assetFilename, //  Use backend value
+              assetFilename: _normalizeAssetFilename(
+                f.assetFilename,
+              ), //  normalize backend value
             ),
           );
         }
@@ -364,7 +373,8 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
       final mapping = <String, String>{};
       for (final c in cards) {
         if (c.assetFilename != null) {
-          final af = c.assetFilename!;
+          final af = _normalizeAssetFilename(c.assetFilename);
+          if (af == null) continue;
           // Prefer backend filename only if it's available locally; otherwise
           // try to resolve to a full asset path via AssetService.lookup
           if (_availableFilenames.contains(af)) {
@@ -377,7 +387,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
             try {
               final resolved = await AssetService.instance.lookup(base);
               if (resolved != null) {
-                mapping[c.answer] = resolved; // full path
+                mapping[c.answer] = resolved.split('/').last; // filename only
               } else {
                 // fallback to backend-provided name (may still fail)
                 mapping[c.answer] = af;
@@ -391,7 +401,8 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
       // Also add favorite cards to mapping
       for (final c in _favoriteCards) {
         if (c.assetFilename != null) {
-          final af = c.assetFilename!;
+          final af = _normalizeAssetFilename(c.assetFilename);
+          if (af == null) continue;
           if (_availableFilenames.contains(af)) {
             mapping[c.answer] = af;
           } else {
@@ -401,7 +412,9 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
             );
             try {
               final resolved = await AssetService.instance.lookup(base);
-              if (resolved != null) mapping[c.answer] = resolved;
+              if (resolved != null) {
+                mapping[c.answer] = resolved.split('/').last;
+              }
             } catch (_) {}
           }
         }
@@ -944,8 +957,9 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
       scrollDirection: Axis.horizontal,
       child: Row(
         children: selected.map((s) {
-          final assetPath = s.assetFilename != null
-              ? 'assets/mulberry-symbols/EN-symbols/${s.assetFilename}'
+          final filename = _normalizeAssetFilename(s.assetFilename);
+          final assetPath = filename != null
+              ? 'assets/mulberry-symbols/EN-symbols/$filename'
               : null;
           return Container(
             width: 140,
