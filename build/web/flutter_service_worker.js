@@ -3,9 +3,9 @@ const MANIFEST = 'flutter-app-manifest';
 const TEMP = 'flutter-temp-cache';
 const CACHE_NAME = 'flutter-app-cache';
 
-const RESOURCES = {"assets/AssetManifest.bin": "6dad5d50efbda75d4cbd825b51a27103",
-"assets/AssetManifest.bin.json": "18260d32e8062f6bc253caf4483cf7e5",
-"assets/AssetManifest.json": "63295a5ae250016f37be05c342dad903",
+const RESOURCES = {"assets/AssetManifest.bin": "61578a64821a8f16082589d8ff5f5e0c",
+"assets/AssetManifest.bin.json": "bf58c6273c96198f1a7f7a5251c36c08",
+"assets/AssetManifest.json": "36b92ad62263971f0f095e92f49e9541",
 "assets/assets/mulberry-symbols/EN-symbols/A.svg": "8a864bbc45e0266873a55772d1b66b02",
 "assets/assets/mulberry-symbols/EN-symbols/above.svg": "772f394b5f87cc96e197e6f81766fe63",
 "assets/assets/mulberry-symbols/EN-symbols/absent.svg": "9f0becfe2e565ad0d3b0cba214d8b0fa",
@@ -205,6 +205,7 @@ const RESOURCES = {"assets/AssetManifest.bin": "6dad5d50efbda75d4cbd825b51a27103
 "assets/assets/mulberry-symbols/EN-symbols/blackcurrant_juice.svg": "79d916162f8ef472df48e20be554b0fc",
 "assets/assets/mulberry-symbols/EN-symbols/bladder.svg": "b799dbf93bc7bd9a06cbc9f87396bfa2",
 "assets/assets/mulberry-symbols/EN-symbols/bladder_kidneys.svg": "eb0cd22d5420e4b7d0dfadc475699342",
+"assets/assets/mulberry-symbols/EN-symbols/blank.svg": "0de05a0e81822843c125c7a13548f21c",
 "assets/assets/mulberry-symbols/EN-symbols/blanket.svg": "0c38aed8691eff21bedfda270fda9b19",
 "assets/assets/mulberry-symbols/EN-symbols/blanket_chest.svg": "644f348a1f06776604a279e4897b5313",
 "assets/assets/mulberry-symbols/EN-symbols/blender_drinks.svg": "8885c3a706631372db32b9b755b9f972",
@@ -3461,7 +3462,7 @@ const RESOURCES = {"assets/AssetManifest.bin": "6dad5d50efbda75d4cbd825b51a27103
 "canvaskit/skwasm_heavy.wasm": "8034ad26ba2485dab2fd49bdd786837b",
 "favicon.png": "5dcef449791fa27946b3d35ad8803796",
 "flutter.js": "888483df48293866f9f41d3d9274a779",
-"flutter_bootstrap.js": "c52570cbd308a0387b5f1a736eb08e57",
+"flutter_bootstrap.js": "60e928bdb544b3c5b8f4d72866bebf4f",
 "icons/Icon-192.png": "ac9a721a12bbc803b44f645561ecb1e1",
 "icons/Icon-512.png": "96e752610906ba2a93c65f8abe1645f1",
 "icons/Icon-maskable-192.png": "c457ef57daa1d16f64b27b786ec2ea3c",
