@@ -47,7 +47,7 @@ class FavoriteCard {
       answer: (json['answer'] ?? '').toString(),
       assetFilename:
           normalizeAssetFilename(json['asset_filename']?.toString()) ??
-          'blank.svg',
+          'blank.svg', // ✅ Falls back to blank.svg if no match (normalized in GeneratedFlashcard usage)
     );
   }
 
