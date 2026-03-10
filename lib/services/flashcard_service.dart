@@ -1,5 +1,4 @@
 import 'dart:convert';
-// import 'dart:math'; // removed unused
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'asset_service.dart';
@@ -15,15 +14,17 @@ String? normalizeAssetFilename(String? raw) {
 class GeneratedFlashcard {
   final String id;
   final String question;
-  final String answer; // treated as the display word/phrase
+  final String answer;
   final List<String> tags;
-  final String? assetFilename; // matched symbol filename (e.g. dog.svg)
+  final String? assetFilename;
+  final String? fitz; // ✅ Fitzgerald Key category from backend
   GeneratedFlashcard({
     required this.id,
     required this.question,
     required this.answer,
     required this.tags,
     this.assetFilename,
+    this.fitz,
   });
 }
 
@@ -31,7 +32,7 @@ class FavoriteCard {
   final String id;
   final String question;
   final String answer;
-  final String assetFilename; // ✅ Store backend asset filename
+  final String assetFilename;
 
   FavoriteCard({
     required this.id,
@@ -47,7 +48,7 @@ class FavoriteCard {
       answer: (json['answer'] ?? '').toString(),
       assetFilename:
           normalizeAssetFilename(json['asset_filename']?.toString()) ??
-          'blank.svg', // ✅ Falls back to blank.svg if no match (normalized in GeneratedFlashcard usage)
+          'blank.svg',
     );
   }
 
@@ -71,12 +72,10 @@ class FlashcardService {
 
   final String backendBaseUrl;
   final _supabase = Supabase.instance.client;
-  String? _lastGenerationId; // track to avoid duplicates in next call
+  String? _lastGenerationId;
   List<String>? _availableSymbolsCache;
-  final List<String> _recentAnswers =
-      []; // rolling memory to personalize context
+  final List<String> _recentAnswers = [];
 
-  // A lightweight synonym/normalization map to improve symbol matching.
   static const Map<String, List<String>> _synonyms = {
     'airplane': ['aeroplane', 'plane', 'jet', 'aircraft'],
     'car': ['auto', 'automobile', 'vehicle'],
@@ -86,13 +85,9 @@ class FlashcardService {
 
   Future<void> _ensureSymbols() async {
     if (_availableSymbolsCache != null) return;
-    _availableSymbolsCache = await AssetService.listSymbolFilenames(); // fixed
+    _availableSymbolsCache = await AssetService.listSymbolFilenames();
   }
 
-  /// Generate 30 flashcards from backend given caregiver context.
-  /// - Prefers short & medium answers (mixed distribution handled server-side)
-  /// - Avoids previous generation's IDs for novelty
-  /// - Optionally merges favorites (caller can handle UI ordering)
   Future<List<GeneratedFlashcard>> generate({
     required String caregiverInput,
     List<String>? explicitTags,
@@ -103,13 +98,9 @@ class FlashcardService {
     final session = _supabase.auth.currentSession;
     final jwt = session?.accessToken;
 
-    // Use explicitTags only. Do not auto-fetch global tags from DB here.
-    // Tags should be applied per-generation by the caller to avoid leaking
-    // tag context between different questions.
     final List<String>? tagsForRequest =
         (explicitTags != null && explicitTags.isNotEmpty) ? explicitTags : null;
 
-    // Build adaptive context including last successful answers (vocabulary memory)
     String adaptiveContext = caregiverInput.trim();
     if (_recentAnswers.isNotEmpty) {
       final recentSlice = _recentAnswers.take(20).join(', ');
@@ -125,14 +116,14 @@ class FlashcardService {
       'infer_tags': inferTags,
       'reuse': false,
       if (tagsForRequest != null && tagsForRequest.isNotEmpty)
-        'tags': tagsForRequest.take(12).toList(), // cap to keep prompt concise
+        'tags': tagsForRequest.take(12).toList(),
       if (_lastGenerationId != null) 'avoid_generation_id': _lastGenerationId,
     };
 
     final resp = await http.post(
       Uri.parse('$backendBaseUrl/generate_flashcards'),
       headers: {
-        'Authorization': 'Bearer ${jwt ?? ''}', // use the token we read above
+        'Authorization': 'Bearer ${jwt ?? ''}',
         'Content-Type': 'application/json',
       },
       body: json.encode(body),
@@ -149,7 +140,7 @@ class FlashcardService {
         json.decode(resp.body) as Map<String, dynamic>;
     final genId = decoded['generation_id']?.toString();
     if (genId != null && genId.isNotEmpty) {
-      _lastGenerationId = genId; // store for next avoidance
+      _lastGenerationId = genId;
     }
     final List<dynamic> list = decoded['flashcards'] as List<dynamic>? ?? [];
     print('📊 Parsed ${list.length} flashcards from response');
@@ -165,17 +156,16 @@ class FlashcardService {
                 .toList(),
             assetFilename: normalizeAssetFilename(
               m['asset_filename']?.toString(),
-            ), // ✅ normalize backend value
+            ),
+            fitz: m['fitz']?.toString(), // ✅ read fitz from backend response
           );
         })
         .where((c) => c.answer.isNotEmpty)
         .toList();
 
-    // Update rolling memory (most recent first, maintain uniqueness & cap)
     for (final c in cards) {
       final ans = c.answer.trim();
       if (ans.isEmpty) continue;
-      // prevent duplicates: move to front if already exists
       _recentAnswers.removeWhere((w) => w.toLowerCase() == ans.toLowerCase());
       _recentAnswers.insert(0, ans);
     }
@@ -183,11 +173,9 @@ class FlashcardService {
       _recentAnswers.removeRange(60, _recentAnswers.length);
     }
 
-    // ✅ Backend already matched symbols, just return the cards
     return cards;
   }
 
-  /// Fetch user-defined tags (names) from user_tags table. Returns empty list on error.
   Future<List<String>> fetchUserTags() async {
     try {
       final res = await _supabase
@@ -201,7 +189,6 @@ class FlashcardService {
           .where((s) => s.isNotEmpty)
           .toList();
     } catch (e) {
-      // ignore errors and return empty list
       return <String>[];
     }
   }
@@ -227,7 +214,6 @@ class FlashcardService {
       final head = entry.key;
       final all = [entry.key, ...entry.value];
       if (all.contains(word)) {
-        // try each variant for the head symbol
         final direct = _directMatch(head, pool);
         if (direct != null) return direct;
       }
@@ -236,7 +222,7 @@ class FlashcardService {
   }
 
   String? _fuzzyMatch(String word, List<String> pool) {
-    int bestDist = 10; // cap distance search
+    int bestDist = 10;
     String? best;
     for (final f in pool) {
       final base = f.toLowerCase().replaceAll('.svg', '');
@@ -246,7 +232,6 @@ class FlashcardService {
         best = f;
       }
     }
-    // Accept only reasonably close matches (distance <= 2 or small words tolerance)
     if (bestDist <= 2 || (word.length <= 5 && bestDist <= 3)) return best;
     return null;
   }
@@ -263,7 +248,6 @@ class FlashcardService {
     for (var i = 1; i <= m; i++) {
       for (var j = 1; j <= n; j++) {
         final cost = a[i - 1] == b[j - 1] ? 0 : 1;
-        // Use int-safe reducer instead of dart:math min (which infers num)
         dp[i][j] = [
           dp[i - 1][j] + 1,
           dp[i][j - 1] + 1,
@@ -274,8 +258,6 @@ class FlashcardService {
     return dp[m][n];
   }
 
-  // Add a simple generate wrapper so home.dart call matches:
-  // Modify generateFlashcards signature & endpoint:
   Future<List<GeneratedFlashcard>> generateFlashcards({
     required String backendBaseUrl,
     required String context,
@@ -285,9 +267,7 @@ class FlashcardService {
   }) async {
     await _loadAssetIndex();
     final session = _supabase.auth.currentSession;
-    if (session == null) {
-      throw Exception('Not signed in');
-    }
+    if (session == null) throw Exception('Not signed in');
 
     final uri = Uri.parse(
       '$backendBaseUrl/generate_flashcards${lite ? '?lite=1' : ''}',
@@ -327,43 +307,12 @@ class FlashcardService {
       final a = f['answer']?.toString() ?? '';
       if (q.isEmpty || a.isEmpty) continue;
 
-      // Select a useful keyword from the answer for asset matching.
-      // Prefer the first non-stopword token of reasonable length; fall back to last token.
       final cleaned = a.replaceAll(RegExp(r"[^\w\s']"), '');
-      final tokens = cleaned
-          .split(RegExp(r'\s+'))
-          .where((s) => s.isNotEmpty)
-          .toList();
+      final tokens = cleaned.split(RegExp(r'\s+')).where((s) => s.isNotEmpty).toList();
       final stopwords = <String>{
-        'i',
-        "i'm",
-        'im',
-        'am',
-        'are',
-        'you',
-        'we',
-        'they',
-        'he',
-        'she',
-        'it',
-        'what',
-        'why',
-        'how',
-        'when',
-        'where',
-        'the',
-        'a',
-        'an',
-        'to',
-        'do',
-        'does',
-        'please',
-        'would',
-        'like',
-        'want',
-        'wanting',
-        'could',
-        'should',
+        'i',"i'm",'im','am','are','you','we','they','he','she','it',
+        'what','why','how','when','where','the','a','an','to','do',
+        'does','please','would','like','want','wanting','could','should',
       };
       String keyWord = '';
       for (final t in tokens) {
@@ -374,46 +323,37 @@ class FlashcardService {
         }
       }
       if (keyWord.isEmpty) {
-        keyWord = tokens.isNotEmpty
-            ? tokens.last.toLowerCase()
-            : a.toLowerCase();
+        keyWord = tokens.isNotEmpty ? tokens.last.toLowerCase() : a.toLowerCase();
       }
       final asset = _matchAsset(keyWord);
-      out.add(
-        GeneratedFlashcard(
-          id: (f['id'] ?? '').toString(),
-          question: q,
-          answer: a,
-          tags: (f['tags'] is List)
-              ? (f['tags'] as List).map((t) => t.toString()).toList()
-              : <String>[],
-          assetFilename: asset,
-        ),
-      );
+      out.add(GeneratedFlashcard(
+        id: (f['id'] ?? '').toString(),
+        question: q,
+        answer: a,
+        tags: (f['tags'] is List)
+            ? (f['tags'] as List).map((t) => t.toString()).toList()
+            : <String>[],
+        assetFilename: asset,
+        fitz: f['fitz']?.toString(), // ✅ read fitz here too
+      ));
     }
     return out;
   }
 
   String? _matchAsset(String word) {
-    if (_availableSymbolsCache == null || _availableSymbolsCache!.isEmpty)
-      return null;
+    if (_availableSymbolsCache == null || _availableSymbolsCache!.isEmpty) return null;
     final normalized = word.toLowerCase().trim();
     final direct = _directMatch(normalized, _availableSymbolsCache!);
-    final chosen =
-        direct ??
+    return direct ??
         _synonymMatch(normalized, _availableSymbolsCache!) ??
         _fuzzyMatch(normalized, _availableSymbolsCache!);
-    return chosen;
   }
 
   Future<void> _loadAssetIndex() async {
-    final base = backendBaseUrl; // use configured backend base URL
+    final base = backendBaseUrl;
     final session = _supabase.auth.currentSession;
-    if (session == null) {
-      throw Exception('Not signed in (session null)');
-    }
+    if (session == null) throw Exception('Not signed in (session null)');
 
-    // Ensure cache exists
     _availableSymbolsCache ??= <String>[];
 
     final jwt = session.accessToken;
@@ -431,7 +371,7 @@ class FlashcardService {
     final Map<String, dynamic> jsonResp =
         json.decode(resp.body) as Map<String, dynamic>;
     final List<dynamic> list = (jsonResp['files'] as List?) ?? <dynamic>[];
-    final seen = <String>{}; // de-duplication set
+    final seen = <String>{};
     for (final f in list) {
       if (f is! Map) continue;
       final path = f['path']?.toString() ?? '';
@@ -439,15 +379,9 @@ class FlashcardService {
       if (!(path.startsWith('assets/en-symbols/') ||
           path.startsWith('assets/mulberry-symbols/EN-symbols/') ||
           path.contains('/en-symbols/') ||
-          path.contains('/EN-symbols/'))) {
-        continue;
-      }
+          path.contains('/EN-symbols/'))) continue;
 
-      // Normalize to base filename only (avoid double prefixing in UI)
-      final normalized = path
-          .replaceAll('\\', '/')
-          .split('/')
-          .last; // e.g., dog.svg
+      final normalized = path.replaceAll('\\', '/').split('/').last;
       if (normalized.isEmpty || seen.contains(normalized)) continue;
       seen.add(normalized);
       _availableSymbolsCache!.add(normalized);
@@ -471,10 +405,8 @@ class FlashcardService {
         : <dynamic>[];
     return list
         .map((e) {
-          final m = (e is Map)
-              ? Map<String, dynamic>.from(e)
-              : <String, dynamic>{};
-          return FavoriteCard.fromJson(m); // ✅ Use factory method
+          final m = (e is Map) ? Map<String, dynamic>.from(e) : <String, dynamic>{};
+          return FavoriteCard.fromJson(m);
         })
         .where((c) => c.id.isNotEmpty)
         .toList();
@@ -483,32 +415,24 @@ class FlashcardService {
   Future<void> favoriteCard(String cardId) async {
     final session = _supabase.auth.currentSession;
     if (session == null) throw Exception('Not signed in');
-
     final response = await http.post(
       Uri.parse('$backendBaseUrl/flashcards/$cardId/favorite'),
       headers: {'Authorization': 'Bearer ${session.accessToken}'},
     );
-
     if (response.statusCode != 200) {
-      throw Exception(
-        'Failed to favorite: ${response.statusCode} ${response.body}',
-      );
+      throw Exception('Failed to favorite: ${response.statusCode} ${response.body}');
     }
   }
 
   Future<void> unfavoriteCard(String cardId) async {
     final session = _supabase.auth.currentSession;
     if (session == null) throw Exception('Not signed in');
-
     final response = await http.delete(
       Uri.parse('$backendBaseUrl/flashcards/$cardId/favorite'),
       headers: {'Authorization': 'Bearer ${session.accessToken}'},
     );
-
     if (response.statusCode != 200) {
-      throw Exception(
-        'Failed to unfavorite: ${response.statusCode} ${response.body}',
-      );
+      throw Exception('Failed to unfavorite: ${response.statusCode} ${response.body}');
     }
   }
 }

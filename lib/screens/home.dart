@@ -886,15 +886,8 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     final allCards = [..._favoriteCards, ..._generated];
     final map = <String, String>{};
     for (final card in allCards) {
-      try {
-        // ignore: avoid_dynamic_calls
-        final fitz = (card as dynamic).fitz as String?;
-        if (fitz != null && fitz.isNotEmpty) {
-          map[card.answer] = fitz;
-        }
-      } catch (_) {
-        // fitz field not present on this model version — fallback classifier
-        // in FlashcardGrid will handle coloring automatically
+      if (card.fitz != null && card.fitz!.isNotEmpty) {
+        map[card.answer] = card.fitz!;
       }
     }
     return map;
