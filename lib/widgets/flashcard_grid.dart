@@ -2,6 +2,42 @@ import 'package:flutter/material.dart';
 import 'safe_svg.dart';
 import 'package:string_similarity/string_similarity.dart';
 
+enum FitzCategory { green, yellow, blue, white, brown, pink, orange }
+
+class FitzKey {
+  final FitzCategory category;
+  FitzKey(this.category);
+
+  static FitzKey resolve(String word, Map<String, FitzCategory>? backendFitz) {
+    if (backendFitz != null && backendFitz.containsKey(word)) {
+      return FitzKey(backendFitz[word]!);
+    }
+    // Default fallback
+    return FitzKey(FitzCategory.white);
+  }
+
+  Color get color {
+    switch (category) {
+      case FitzCategory.green:
+        return Colors.green.shade200;
+      case FitzCategory.yellow:
+        return Colors.yellow.shade200;
+      case FitzCategory.blue:
+        return Colors.blue.shade200;
+      case FitzCategory.white:
+        return Colors.white;
+      case FitzCategory.brown:
+        return Colors.brown.shade200;
+      case FitzCategory.pink:
+        return Colors.pink.shade100;
+      case FitzCategory.orange:
+        return Colors.orange.shade200;
+      default:
+        return Colors.white;
+    }
+  }
+}
+
 class FlashcardGrid extends StatelessWidget {
   const FlashcardGrid({
     super.key,
@@ -14,6 +50,7 @@ class FlashcardGrid extends StatelessWidget {
     this.preMapped, // optional explicit mapping word -> filename
     this.wordToCardId, // optional mapping word -> card ID
     this.onRate,
+    this.wordToFitz,
   });
 
   final List<String>? words; // list of words/answers to display
@@ -25,6 +62,7 @@ class FlashcardGrid extends StatelessWidget {
   final Map<String, String>? preMapped; // if provided, bypass fuzzy per word
   final Map<String, String>? wordToCardId; // word -> card ID mapping
   final void Function(String word, String? filename)? onRate; // rating callback
+  final Map<String, FitzCategory>? wordToFitz; // word -> FitzCategory mapping
 
   static const double _matchThreshold = 0.5;
 
@@ -110,10 +148,17 @@ class FlashcardGrid extends StatelessWidget {
               onLongPress: () {
                 if (onRate != null) onRate!(word, filename);
               },
-              child: Card(
-                elevation: 2,
-                shape: RoundedRectangleBorder(
+              child: Container(
+                decoration: BoxDecoration(
+                  color: FitzKey.resolve(word, wordToFitz).color,
                   borderRadius: BorderRadius.circular(12),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black12,
+                      blurRadius: 2,
+                      offset: Offset(0, 2),
+                    ),
+                  ],
                 ),
                 child: Stack(
                   children: [
