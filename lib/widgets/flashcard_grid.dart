@@ -8,73 +8,54 @@ class FitzKey {
   final FitzCategory category;
   FitzKey(this.category);
 
-  static FitzKey resolve(String word, Map<String, FitzCategory>? backendFitz) {
-    // Try backend mapping first
+  static FitzKey resolve(String word, Map<String, String>? backendFitz) {
+    // Try backend string value first
     if (backendFitz != null && backendFitz.containsKey(word)) {
-      return FitzKey(backendFitz[word]!);
+      switch (backendFitz[word]) {
+        case 'person':     return FitzKey(FitzCategory.person);
+        case 'verb':       return FitzKey(FitzCategory.verb);
+        case 'descriptor': return FitzKey(FitzCategory.descriptor);
+        case 'noun':       return FitzKey(FitzCategory.noun);
+        case 'social':     return FitzKey(FitzCategory.social);
+        case 'question':   return FitzKey(FitzCategory.question);
+      }
     }
-    // Fallback classification logic
+    // Fallback: classify from the word itself
     final lower = word.toLowerCase();
-    if ([
-      "i",
-      "me",
-      "my",
-      "you",
-      "he",
-      "she",
-      "we",
-      "they",
-      "him",
-      "her",
-      "us",
-      "them",
-    ].contains(lower)) {
-      return FitzKey(FitzCategory.person);
-    }
-    if (["yes", "no", "please", "thanks", "hello", "goodbye"].contains(lower)) {
-      return FitzKey(FitzCategory.social);
-    }
-    if (["what", "where", "who", "when", "why", "how"].contains(lower)) {
-      return FitzKey(FitzCategory.question);
-    }
-    if (lower.endsWith("ing") || lower.endsWith("ed") || lower.endsWith("s")) {
-      return FitzKey(FitzCategory.verb);
-    }
-    if ([
-      "big",
-      "small",
-      "fast",
-      "slow",
-      "happy",
-      "sad",
-      "red",
-      "blue",
-      "green",
-      "old",
-      "new",
-    ].contains(lower)) {
-      return FitzKey(FitzCategory.descriptor);
-    }
-    // Default to noun
+    const people = {'i','me','my','you','he','she','we','they','him','her','us','them','mom','dad','friend','teacher'};
+    const social = {'yes','no','please','thanks','thank','sorry','hello','bye','more','done','stop','help','again','wait','ok','okay'};
+    const questions = {'what','where','who','when','why','how','which'};
+    if (questions.contains(lower)) return FitzKey(FitzCategory.question);
+    if (people.contains(lower))   return FitzKey(FitzCategory.person);
+    if (social.contains(lower))   return FitzKey(FitzCategory.social);
+    if (lower.endsWith('ing') && lower.length > 4) return FitzKey(FitzCategory.verb);
+    if (lower.endsWith('ed')  && lower.length > 3) return FitzKey(FitzCategory.verb);
+    const verbs = {'want','need','feel','am','is','are','was','have','has','do','did','go','eat','drink','hurt','hurts','help','like','love','hate','see','hear','sleep','run','walk','play','get','give','take','make','come','can','will','dont','cant'};
+    if (verbs.contains(lower)) return FitzKey(FitzCategory.verb);
+    const descriptors = {'good','bad','happy','sad','tired','angry','scared','sick','okay','fine','sore','better','worse','big','small','hot','cold','fast','slow','loud','quiet','hungry','thirsty','full','ready','clean','dirty','old','new','red','blue','green','yellow','purple','orange','pink','brown','black','white'};
+    if (descriptors.contains(lower)) return FitzKey(FitzCategory.descriptor);
     return FitzKey(FitzCategory.noun);
   }
 
-  Color get color {
+  Color get borderColor {
     switch (category) {
-      case FitzCategory.person:
-        return Colors.yellow.shade200;
-      case FitzCategory.verb:
-        return Colors.green.shade200;
-      case FitzCategory.descriptor:
-        return Colors.blue.shade200;
-      case FitzCategory.noun:
-        return Colors.orange.shade200;
-      case FitzCategory.social:
-        return Colors.grey.shade200;
-      case FitzCategory.question:
-        return Colors.purple.shade200;
-      default:
-        return Colors.white;
+      case FitzCategory.person:     return const Color(0xFFFFD600);
+      case FitzCategory.verb:       return const Color(0xFF43A047);
+      case FitzCategory.descriptor: return const Color(0xFF1E88E5);
+      case FitzCategory.noun:       return const Color(0xFFEF6C00);
+      case FitzCategory.social:     return const Color(0xFF9E9E9E);
+      case FitzCategory.question:   return const Color(0xFF8E24AA);
+    }
+  }
+
+  Color get bgColor {
+    switch (category) {
+      case FitzCategory.person:     return const Color(0xFFFFFDE7);
+      case FitzCategory.verb:       return const Color(0xFFF1F8E9);
+      case FitzCategory.descriptor: return const Color(0xFFE3F2FD);
+      case FitzCategory.noun:       return const Color(0xFFFFF3E0);
+      case FitzCategory.social:     return const Color(0xFFF5F5F5);
+      case FitzCategory.question:   return const Color(0xFFF3E5F5);
     }
   }
 }
@@ -88,22 +69,22 @@ class FlashcardGrid extends StatelessWidget {
     this.onToggleFavorite,
     this.tags,
     this.availableFilenames,
-    this.preMapped, // optional explicit mapping word -> filename
-    this.wordToCardId, // optional mapping word -> card ID
+    this.preMapped,
+    this.wordToCardId,
     this.onRate,
     this.wordToFitz,
   });
 
-  final List<String>? words; // list of words/answers to display
+  final List<String>? words;
   final ValueChanged<String>? onCardTap;
-  final ValueChanged<String>? onToggleFavorite; // receives card ID
-  final Set<String>? favorites; // set of card IDs (not filenames)
-  final Map<String, List<String>>? tags; // filename -> tags
-  final List<String>? availableFilenames; // injected list of symbol filenames
-  final Map<String, String>? preMapped; // if provided, bypass fuzzy per word
-  final Map<String, String>? wordToCardId; // word -> card ID mapping
-  final void Function(String word, String? filename)? onRate; // rating callback
-  final Map<String, FitzCategory>? wordToFitz; // word -> FitzCategory mapping
+  final ValueChanged<String>? onToggleFavorite;
+  final Set<String>? favorites;
+  final Map<String, List<String>>? tags;
+  final List<String>? availableFilenames;
+  final Map<String, String>? preMapped;
+  final Map<String, String>? wordToCardId;
+  final void Function(String word, String? filename)? onRate;
+  final Map<String, String>? wordToFitz; // word -> fitz string from backend
 
   static const double _matchThreshold = 0.5;
 
@@ -132,19 +113,17 @@ class FlashcardGrid extends StatelessWidget {
   Widget build(BuildContext context) {
     final items = words ?? const <String>[];
 
-    // Build list of tuples (word, matchedFilename)
     final mapped = items.map((w) {
       final match = _findBestMatch(w);
       return MapEntry(w, match);
     }).toList();
 
-    // Reorder so favorites appear first (if favorites set provided)
     List<MapEntry<String, String?>> ordered;
     if (favorites != null && favorites!.isNotEmpty && wordToCardId != null) {
       final fav = <MapEntry<String, String?>>[];
       final other = <MapEntry<String, String?>>[];
       for (final e in mapped) {
-        final cardId = wordToCardId![e.key]; // get card ID for this word
+        final cardId = wordToCardId![e.key];
         if (cardId != null && favorites!.contains(cardId)) {
           fav.add(e);
         } else {
@@ -161,6 +140,7 @@ class FlashcardGrid extends StatelessWidget {
         final width = constraints.maxWidth;
         int crossAxisCount = (width / 260).floor();
         if (crossAxisCount < 2) crossAxisCount = 2;
+
         return GridView.count(
           padding: const EdgeInsets.all(12),
           crossAxisCount: crossAxisCount,
@@ -169,35 +149,35 @@ class FlashcardGrid extends StatelessWidget {
           childAspectRatio: 1.0,
           children: ordered.map((entry) {
             final word = entry.key;
-            final filename = entry.value; // may be null
-            final assetPath = (filename != null)
+            final filename = entry.value;
+            final assetPath = filename != null
                 ? 'assets/mulberry-symbols/EN-symbols/$filename'
-                : null; // ✅ No asset if symbol doesn't match
-            final cardId = wordToCardId?[word]; // get card ID for this word
-            final isFavorite =
-                cardId != null &&
+                : null;
+            final cardId = wordToCardId?[word];
+            final isFavorite = cardId != null &&
                 favorites != null &&
-                favorites!.contains(cardId); // check by card ID
+                favorites!.contains(cardId);
             final fileTags = (filename != null && tags != null)
                 ? tags![filename] ?? []
                 : <String>[];
 
+            final fitz = FitzKey.resolve(word, wordToFitz);
+            final border = fitz.borderColor;
+            final bg = fitz.bgColor;
+
             return GestureDetector(
-              onTap: () {
-                if (onCardTap != null) onCardTap!(word);
-              },
-              onLongPress: () {
-                if (onRate != null) onRate!(word, filename);
-              },
+              onTap: () => onCardTap?.call(word),
+              onLongPress: () => onRate?.call(word, filename),
               child: Container(
                 decoration: BoxDecoration(
-                  color: FitzKey.resolve(word, wordToFitz).color,
+                  color: bg,
                   borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: border, width: 3.5),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black12,
-                      blurRadius: 2,
-                      offset: Offset(0, 2),
+                      color: border.withOpacity(0.18),
+                      blurRadius: 6,
+                      offset: const Offset(0, 2),
                     ),
                   ],
                 ),
@@ -205,9 +185,7 @@ class FlashcardGrid extends StatelessWidget {
                   children: [
                     Padding(
                       padding: const EdgeInsets.symmetric(
-                        vertical: 8,
-                        horizontal: 12,
-                      ),
+                          vertical: 8, horizontal: 12),
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
@@ -219,9 +197,7 @@ class FlashcardGrid extends StatelessWidget {
                                 child: assetPath != null
                                     ? Padding(
                                         padding: const EdgeInsets.symmetric(
-                                          vertical: 8.0,
-                                          horizontal: 8.0,
-                                        ),
+                                            vertical: 8.0, horizontal: 8.0),
                                         child: SafeSvg(
                                           assetPath: assetPath,
                                           fit: BoxFit.contain,
@@ -231,16 +207,15 @@ class FlashcardGrid extends StatelessWidget {
                                     : Container(
                                         height: 120,
                                         decoration: BoxDecoration(
-                                          color: Colors.grey.shade100,
-                                          borderRadius: BorderRadius.circular(
-                                            8,
-                                          ),
+                                          color: border.withOpacity(0.08),
+                                          borderRadius:
+                                              BorderRadius.circular(8),
                                         ),
-                                        child: const Center(
+                                        child: Center(
                                           child: Icon(
                                             Icons.help_outline,
                                             size: 48,
-                                            color: Colors.black26,
+                                            color: border.withOpacity(0.35),
                                           ),
                                         ),
                                       ),
@@ -267,7 +242,6 @@ class FlashcardGrid extends StatelessWidget {
                       top: 6,
                       child: GestureDetector(
                         onTap: () {
-                          // toggle favorite for this flashcard (pass card ID)
                           if (onToggleFavorite != null && cardId != null) {
                             onToggleFavorite!(cardId);
                           }
@@ -283,16 +257,14 @@ class FlashcardGrid extends StatelessWidget {
                       ),
                     ),
 
-                    // Small tag indicators bottom-left
+                    // Tags bottom-left
                     if (fileTags.isNotEmpty)
                       Positioned(
                         left: 8,
                         bottom: 8,
                         child: Container(
                           padding: const EdgeInsets.symmetric(
-                            vertical: 4,
-                            horizontal: 6,
-                          ),
+                              vertical: 4, horizontal: 6),
                           decoration: BoxDecoration(
                             color: Colors.black.withAlpha(15),
                             borderRadius: BorderRadius.circular(6),
@@ -300,9 +272,7 @@ class FlashcardGrid extends StatelessWidget {
                           child: Text(
                             fileTags.take(2).map((t) => '#$t').join(' '),
                             style: const TextStyle(
-                              fontSize: 12,
-                              color: Colors.black54,
-                            ),
+                                fontSize: 12, color: Colors.black54),
                           ),
                         ),
                       ),
