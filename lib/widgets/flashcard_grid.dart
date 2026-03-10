@@ -2,36 +2,77 @@ import 'package:flutter/material.dart';
 import 'safe_svg.dart';
 import 'package:string_similarity/string_similarity.dart';
 
-enum FitzCategory { green, yellow, blue, white, brown, pink, orange }
+enum FitzCategory { person, verb, descriptor, noun, social, question }
 
 class FitzKey {
   final FitzCategory category;
   FitzKey(this.category);
 
   static FitzKey resolve(String word, Map<String, FitzCategory>? backendFitz) {
+    // Try backend mapping first
     if (backendFitz != null && backendFitz.containsKey(word)) {
       return FitzKey(backendFitz[word]!);
     }
-    // Default fallback
-    return FitzKey(FitzCategory.white);
+    // Fallback classification logic
+    final lower = word.toLowerCase();
+    if ([
+      "i",
+      "me",
+      "my",
+      "you",
+      "he",
+      "she",
+      "we",
+      "they",
+      "him",
+      "her",
+      "us",
+      "them",
+    ].contains(lower)) {
+      return FitzKey(FitzCategory.person);
+    }
+    if (["yes", "no", "please", "thanks", "hello", "goodbye"].contains(lower)) {
+      return FitzKey(FitzCategory.social);
+    }
+    if (["what", "where", "who", "when", "why", "how"].contains(lower)) {
+      return FitzKey(FitzCategory.question);
+    }
+    if (lower.endsWith("ing") || lower.endsWith("ed") || lower.endsWith("s")) {
+      return FitzKey(FitzCategory.verb);
+    }
+    if ([
+      "big",
+      "small",
+      "fast",
+      "slow",
+      "happy",
+      "sad",
+      "red",
+      "blue",
+      "green",
+      "old",
+      "new",
+    ].contains(lower)) {
+      return FitzKey(FitzCategory.descriptor);
+    }
+    // Default to noun
+    return FitzKey(FitzCategory.noun);
   }
 
   Color get color {
     switch (category) {
-      case FitzCategory.green:
-        return Colors.green.shade200;
-      case FitzCategory.yellow:
+      case FitzCategory.person:
         return Colors.yellow.shade200;
-      case FitzCategory.blue:
+      case FitzCategory.verb:
+        return Colors.green.shade200;
+      case FitzCategory.descriptor:
         return Colors.blue.shade200;
-      case FitzCategory.white:
-        return Colors.white;
-      case FitzCategory.brown:
-        return Colors.brown.shade200;
-      case FitzCategory.pink:
-        return Colors.pink.shade100;
-      case FitzCategory.orange:
+      case FitzCategory.noun:
         return Colors.orange.shade200;
+      case FitzCategory.social:
+        return Colors.grey.shade200;
+      case FitzCategory.question:
+        return Colors.purple.shade200;
       default:
         return Colors.white;
     }
