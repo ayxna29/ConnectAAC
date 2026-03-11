@@ -181,7 +181,9 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
         try {
           final available = await _speech.initialize();
           final hasPermission = _speech.hasPermission == true;
-          print('Microphone status refresh (web): hasPerm:${hasPermission ? 'yes' : 'no'}, initialized:${available ? 'yes' : 'no'}');
+          print(
+            'Microphone status refresh (web): hasPerm:${hasPermission ? 'yes' : 'no'}, initialized:${available ? 'yes' : 'no'}',
+          );
           if (mounted) setState(() {});
         } catch (e) {
           print('Failed to refresh mic status (web): $e');
@@ -193,7 +195,9 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
       final status = await Permission.microphone.status;
       final hasPermission = _speech.hasPermission == true;
       final initialized = _speech.isAvailable;
-      print('Microphone status refresh: ${status.toString().split('.').last}, hasPerm:${hasPermission ? 'yes' : 'no'}, initialized:${initialized ? 'yes' : 'no'}');
+      print(
+        'Microphone status refresh: ${status.toString().split('.').last}, hasPerm:${hasPermission ? 'yes' : 'no'}, initialized:${initialized ? 'yes' : 'no'}',
+      );
       if (mounted) setState(() {});
     } catch (e) {
       print('Failed to refresh mic status: $e');
@@ -337,7 +341,10 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
           if (_availableFilenames.contains(af)) {
             mapping[c.answer] = af;
           } else {
-            final base = af.replaceAll(RegExp(r'\.svg$', caseSensitive: false), '');
+            final base = af.replaceAll(
+              RegExp(r'\.svg$', caseSensitive: false),
+              '',
+            );
             try {
               final resolved = await AssetService.instance.lookup(base);
               if (resolved != null) {
@@ -358,7 +365,10 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
           if (_availableFilenames.contains(af)) {
             mapping[c.answer] = af;
           } else {
-            final base = af.replaceAll(RegExp(r'\.svg$', caseSensitive: false), '');
+            final base = af.replaceAll(
+              RegExp(r'\.svg$', caseSensitive: false),
+              '',
+            );
             try {
               final resolved = await AssetService.instance.lookup(base);
               if (resolved != null) {
@@ -432,7 +442,9 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
 
       Map<String, String>? voice;
       if (voiceRaw is Map) {
-        voice = voiceRaw.map((k, v) => MapEntry(k.toString(), v?.toString() ?? ''));
+        voice = voiceRaw.map(
+          (k, v) => MapEntry(k.toString(), v?.toString() ?? ''),
+        );
       }
 
       final rate = (rateRaw is double) ? rateRaw : _currentRate;
@@ -489,9 +501,9 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   }
 
   Future<void> _openAiOptimization() async {
-    await Navigator.of(context).push(
-      CupertinoPageRoute(builder: (_) => const OptimizationPage()),
-    );
+    await Navigator.of(
+      context,
+    ).push(CupertinoPageRoute(builder: (_) => const OptimizationPage()));
     await _initFavorites();
   }
 
@@ -536,7 +548,9 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
               context: context,
               builder: (_) => CupertinoAlertDialog(
                 title: const Text('Microphone Permission'),
-                content: const Text('Please allow microphone access in your browser.'),
+                content: const Text(
+                  'Please allow microphone access in your browser.',
+                ),
                 actions: [
                   CupertinoDialogAction(
                     child: const Text('OK'),
@@ -575,7 +589,9 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
               context: context,
               builder: (_) => CupertinoAlertDialog(
                 title: const Text('Microphone Error'),
-                content: const Text('Could not initialize speech recognition in the browser.'),
+                content: const Text(
+                  'Could not initialize speech recognition in the browser.',
+                ),
                 actions: [
                   CupertinoDialogAction(
                     child: const Text('OK'),
@@ -620,7 +636,9 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
             context: context,
             builder: (_) => CupertinoAlertDialog(
               title: const Text('Microphone Permission'),
-              content: const Text('Microphone access is required. Please enable it in app settings.'),
+              content: const Text(
+                'Microphone access is required. Please enable it in app settings.',
+              ),
               actions: [
                 CupertinoDialogAction(
                   child: const Text('Open Settings'),
@@ -669,7 +687,9 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
               context: context,
               builder: (_) => CupertinoAlertDialog(
                 title: const Text('Microphone Error'),
-                content: const Text('Could not initialize speech recognition. Try restarting the app or checking OS settings.'),
+                content: const Text(
+                  'Could not initialize speech recognition. Try restarting the app or checking OS settings.',
+                ),
                 actions: [
                   CupertinoDialogAction(
                     child: const Text('OK'),
@@ -819,7 +839,9 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   }
 
   List<String> _getSortedWords() {
-    final generatedAnswers = _generated.map((c) => c.answer.toLowerCase()).toSet();
+    final generatedAnswers = _generated
+        .map((c) => c.answer.toLowerCase())
+        .toSet();
     final favWords = _favoriteCards
         .where((c) => !generatedAnswers.contains(c.answer.toLowerCase()))
         .map((c) => c.answer)
@@ -864,13 +886,20 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                   height: 72,
                   child: assetPath != null
                       ? SvgPicture.asset(assetPath, fit: BoxFit.contain)
-                      : const Icon(Icons.help_outline, size: 48, color: Colors.black26),
+                      : const Icon(
+                          Icons.help_outline,
+                          size: 48,
+                          color: Colors.black26,
+                        ),
                 ),
                 const SizedBox(height: 6),
                 Text(
                   s.word,
                   textAlign: TextAlign.center,
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
                 ),
               ],
             ),
@@ -890,6 +919,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
         map[card.answer] = card.fitz!;
       }
     }
+    print('🎨 wordToFitz: $map'); // ADD THIS
     return map;
   }
 
@@ -920,7 +950,11 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                   color: Color.fromARGB(255, 153, 160, 113),
                 ),
                 padding: const EdgeInsets.all(8),
-                child: const Icon(CupertinoIcons.settings, size: 24, color: CupertinoColors.white),
+                child: const Icon(
+                  CupertinoIcons.settings,
+                  size: 24,
+                  color: CupertinoColors.white,
+                ),
               ),
             ),
             const SizedBox(width: 8),
@@ -933,7 +967,11 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                   color: Color.fromARGB(255, 153, 160, 113),
                 ),
                 padding: const EdgeInsets.all(8),
-                child: const Icon(CupertinoIcons.sparkles, size: 24, color: CupertinoColors.white),
+                child: const Icon(
+                  CupertinoIcons.sparkles,
+                  size: 24,
+                  color: CupertinoColors.white,
+                ),
               ),
             ),
           ],
@@ -951,7 +989,10 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                     child: CupertinoTextField(
                       controller: caregiverInputController,
                       placeholder: 'Type or say a question/statement...',
-                      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+                      padding: const EdgeInsets.symmetric(
+                        vertical: 14,
+                        horizontal: 16,
+                      ),
                       decoration: BoxDecoration(
                         color: CupertinoColors.systemGrey6,
                         borderRadius: BorderRadius.circular(24),
@@ -964,21 +1005,33 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                     onPressed: _loadingGeneration ? null : _generateFromInput,
                     child: _loadingGeneration
                         ? const CupertinoActivityIndicator()
-                        : const Icon(CupertinoIcons.sparkles, size: 28, color: CupertinoColors.activeGreen),
+                        : const Icon(
+                            CupertinoIcons.sparkles,
+                            size: 28,
+                            color: CupertinoColors.activeGreen,
+                          ),
                   ),
                   const SizedBox(width: 4),
                   CupertinoButton(
                     padding: EdgeInsets.zero,
                     onPressed: _onKeyboardPressed,
-                    child: const Icon(CupertinoIcons.keyboard, size: 28, color: CupertinoColors.activeBlue),
+                    child: const Icon(
+                      CupertinoIcons.keyboard,
+                      size: 28,
+                      color: CupertinoColors.activeBlue,
+                    ),
                   ),
                   CupertinoButton(
                     padding: EdgeInsets.zero,
                     onPressed: _toggleListening,
                     child: Icon(
-                      _isListening ? CupertinoIcons.mic_fill : CupertinoIcons.mic,
+                      _isListening
+                          ? CupertinoIcons.mic_fill
+                          : CupertinoIcons.mic,
                       size: 28,
-                      color: _isListening ? CupertinoColors.systemRed : CupertinoColors.activeBlue,
+                      color: _isListening
+                          ? CupertinoColors.systemRed
+                          : CupertinoColors.activeBlue,
                     ),
                   ),
                 ],
@@ -993,7 +1046,10 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                   color: CupertinoColors.systemGrey6,
                   borderRadius: BorderRadius.circular(24),
                 ),
-                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+                padding: const EdgeInsets.symmetric(
+                  vertical: 12,
+                  horizontal: 12,
+                ),
                 child: Row(
                   children: [
                     Expanded(child: _buildOutputItems()),
@@ -1001,19 +1057,30 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                     CupertinoButton(
                       padding: EdgeInsets.all(0),
                       onPressed: _onBackspace,
-                      child: const Icon(CupertinoIcons.delete_left, color: CupertinoColors.systemGrey),
+                      child: const Icon(
+                        CupertinoIcons.delete_left,
+                        color: CupertinoColors.systemGrey,
+                      ),
                     ),
                     const SizedBox(width: 8),
                     CupertinoButton(
                       padding: EdgeInsets.all(0),
                       onPressed: _onClear,
-                      child: const Icon(CupertinoIcons.clear_thick_circled, size: 26, color: CupertinoColors.destructiveRed),
+                      child: const Icon(
+                        CupertinoIcons.clear_thick_circled,
+                        size: 26,
+                        color: CupertinoColors.destructiveRed,
+                      ),
                     ),
                     const SizedBox(width: 8),
                     CupertinoButton(
                       padding: EdgeInsets.all(0),
                       onPressed: _speakAll,
-                      child: const Icon(CupertinoIcons.speaker_2, size: 26, color: CupertinoColors.activeBlue),
+                      child: const Icon(
+                        CupertinoIcons.speaker_2,
+                        size: 26,
+                        color: CupertinoColors.activeBlue,
+                      ),
                     ),
                   ],
                 ),
@@ -1023,7 +1090,10 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
             // flashcard grid
             Expanded(
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 8.0,
+                  vertical: 8,
+                ),
                 child: FlashcardGrid(
                   onCardTap: _onFlashcardTap,
                   onToggleFavorite: _onToggleFavorite,
