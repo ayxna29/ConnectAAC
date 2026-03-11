@@ -17,7 +17,7 @@ class GeneratedFlashcard {
   final String answer;
   final List<String> tags;
   final String? assetFilename;
-  final String? fitz; // ✅ Fitzgerald Key category from backend
+  final String? fitz; // 
   GeneratedFlashcard({
     required this.id,
     required this.question,
