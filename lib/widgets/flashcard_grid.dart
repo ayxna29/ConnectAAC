@@ -106,7 +106,6 @@ class FlashcardGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final items = words ?? const <String>[];
-
     final mapped = items.map((w) => MapEntry(w, _findBestMatch(w))).toList();
 
     List<MapEntry<String, String?>> ordered;
@@ -126,7 +125,6 @@ class FlashcardGrid extends StatelessWidget {
       ordered = mapped;
     }
 
-    // Limit to maxCards
     final visible = ordered.take(maxCards).toList();
 
     return LayoutBuilder(
@@ -134,10 +132,8 @@ class FlashcardGrid extends StatelessWidget {
         final totalWidth = constraints.maxWidth;
         final totalHeight = constraints.maxHeight;
 
-        // Figure out best grid layout to fit all cards without scrolling
         int cols = 2;
         int rows = (visible.length / cols).ceil();
-        // Try increasing cols until cards fit nicely
         for (int c = 2; c <= 10; c++) {
           final r = (visible.length / c).ceil();
           final cardW = (totalWidth - (c + 1) * 10) / c;
@@ -152,24 +148,27 @@ class FlashcardGrid extends StatelessWidget {
         final cardH = (totalHeight - (rows + 1) * 10) / rows;
         final cardSize = cardW < cardH ? cardW : cardH;
 
-        // Scale text/icons based on card size
         final iconSize = (cardSize * 0.45).clamp(24.0, 100.0);
         final fontSize = (cardSize * 0.14).clamp(9.0, 18.0);
         final borderRadius = (cardSize * 0.1).clamp(6.0, 14.0);
 
         return GridView.count(
-          physics: const NeverScrollableScrollPhysics(),
+          physics: const BouncingScrollPhysics(),
           padding: const EdgeInsets.all(10),
           crossAxisCount: cols,
           crossAxisSpacing: 10,
           mainAxisSpacing: 10,
-          childAspectRatio: cardW / cardH,
+          childAspectRatio: 1.0,
           children: visible.map((entry) {
             final word = entry.key;
             final filename = entry.value;
-            final assetPath = filename != null
+
+            // Treat blank.svg as no image — show word placeholder instead
+            final isBlank = filename == null || filename.toLowerCase() == 'blank.svg';
+            final assetPath = !isBlank
                 ? 'assets/mulberry-symbols/EN-symbols/$filename'
                 : null;
+
             final cardId = wordToCardId?[word];
             final isFavorite = cardId != null && favorites != null && favorites!.contains(cardId);
             final fileTags = (filename != null && tags != null) ? tags![filename] ?? [] : <String>[];
@@ -201,6 +200,7 @@ class FlashcardGrid extends StatelessWidget {
                               child: assetPath != null
                                   ? SafeSvg(assetPath: assetPath, fit: BoxFit.contain, height: iconSize)
                                   : Container(
+                                      width: double.infinity,
                                       decoration: BoxDecoration(
                                         color: border.withOpacity(0.12),
                                         borderRadius: BorderRadius.circular(6),
@@ -210,9 +210,9 @@ class FlashcardGrid extends StatelessWidget {
                                           word,
                                           textAlign: TextAlign.center,
                                           style: TextStyle(
-                                            fontSize: fontSize + 4,
+                                            fontSize: (fontSize + 14).clamp(18.0, 48.0),
                                             fontWeight: FontWeight.bold,
-                                            color: border.withOpacity(0.7),
+                                            color: border.withOpacity(0.75),
                                           ),
                                         ),
                                       ),
@@ -231,7 +231,6 @@ class FlashcardGrid extends StatelessWidget {
                         ],
                       ),
                     ),
-                    // Favorite toggle
                     Positioned(
                       right: 3,
                       top: 3,
@@ -250,7 +249,6 @@ class FlashcardGrid extends StatelessWidget {
                         ),
                       ),
                     ),
-                    // Tags
                     if (fileTags.isNotEmpty)
                       Positioned(
                         left: 4,
