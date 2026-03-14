@@ -238,6 +238,81 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+
+  // Grid presets: label, cols, rows, total cards
+  static const List<Map<String, dynamic>> _gridPresets = [
+    {'label': '2×3', 'cols': 2, 'rows': 3, 'count': 6},
+    {'label': '3×3', 'cols': 3, 'rows': 3, 'count': 9},
+    {'label': '3×4', 'cols': 3, 'rows': 4, 'count': 12},
+    {'label': '4×4', 'cols': 4, 'rows': 4, 'count': 16},
+    {'label': '4×5', 'cols': 4, 'rows': 5, 'count': 20},
+    {'label': '5×5', 'cols': 5, 'rows': 5, 'count': 25},
+    {'label': '5×6', 'cols': 5, 'rows': 6, 'count': 30},
+    {'label': '6×6', 'cols': 6, 'rows': 6, 'count': 36},
+    {'label': '7×6', 'cols': 7, 'rows': 6, 'count': 42},
+  ];
+
+  Widget _gridSizePicker() {
+    return Wrap(
+      spacing: 10,
+      runSpacing: 10,
+      children: _gridPresets.map((preset) {
+        final count = preset['count'] as int;
+        final cols = preset['cols'] as int;
+        final rows = preset['rows'] as int;
+        final label = preset['label'] as String;
+        final isSelected = _cardCount == count;
+
+        return GestureDetector(
+          onTap: () => setState(() => _cardCount = count),
+          child: Container(
+            width: 72,
+            height: 80,
+            decoration: BoxDecoration(
+              color: isSelected ? const Color(0xFFE3F2FD) : CupertinoColors.systemGrey6,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: isSelected ? const Color(0xFF64B5F6) : CupertinoColors.systemGrey4,
+                width: isSelected ? 2.5 : 1.5,
+              ),
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                // Mini grid preview
+                SizedBox(
+                  width: 40,
+                  height: 34,
+                  child: GridView.count(
+                    crossAxisCount: cols,
+                    physics: const NeverScrollableScrollPhysics(),
+                    crossAxisSpacing: 2,
+                    mainAxisSpacing: 2,
+                    children: List.generate(cols * rows, (_) => Container(
+                      decoration: BoxDecoration(
+                        color: isSelected ? const Color(0xFF64B5F6) : CupertinoColors.systemGrey3,
+                        borderRadius: BorderRadius.circular(1),
+                      ),
+                    )),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                    color: isSelected ? const Color(0xFF1565C0) : CupertinoColors.label,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }).toList(),
+    );
+  }
+
   void _onSave() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt('card_count', _cardCount);
@@ -279,22 +354,17 @@ class _SettingsPageState extends State<SettingsPage> {
               const SizedBox(height: 20),
               const Divider(),
               const SizedBox(height: 16),
-              Text(
-                'Flashcard Count: $_cardCount',
-                style: const TextStyle(fontWeight: FontWeight.bold),
+              const Text(
+                'Grid Size',
+                style: TextStyle(fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 4),
               const Text(
-                'More cards = smaller cards, less scrolling.',
+                'More cells = smaller cards. Tap a layout to select it.',
                 style: TextStyle(fontSize: 13, color: CupertinoColors.inactiveGray),
               ),
-              CupertinoSlider(
-                value: _cardCount.toDouble(),
-                min: 6,
-                max: 40,
-                divisions: 34,
-                onChanged: (v) => setState(() => _cardCount = v.round()),
-              ),
+              const SizedBox(height: 12),
+              _gridSizePicker(),
               const SizedBox(height: 20),
               const Divider(),
               const SizedBox(height: 16),

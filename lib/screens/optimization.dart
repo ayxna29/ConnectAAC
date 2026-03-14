@@ -33,6 +33,14 @@ class _OptimizationPageState extends State<OptimizationPage> {
   String _profileRole = '';
   bool _profileSaving = false;
 
+  final List<String> _allRoles = [
+    'AAC User',
+    'Parent/Guardian',
+    'Speech Therapist',
+    'Occupational Therapist',
+    'Other',
+  ];
+
   // favorites
   final TextEditingController _favController = TextEditingController();
   final List<Map<String, String>> _favoriteItems = [];
@@ -64,9 +72,8 @@ class _OptimizationPageState extends State<OptimizationPage> {
     setState(() => _loading = true);
     try {
       await Future.wait([_loadProfile(), _loadTags(), _loadFavorites()]);
-    } catch (e) {
-      // ignore
-    } finally {
+    } catch (e) {}
+    finally {
       if (mounted) setState(() => _loading = false);
     }
   }
@@ -85,9 +92,7 @@ class _OptimizationPageState extends State<OptimizationPage> {
         _profileRole = res['role']?.toString() ?? '';
         _profileAgeController.text = res['age']?.toString() ?? '';
       }
-    } catch (e) {
-      // ignore
-    }
+    } catch (e) {}
   }
 
   Future<void> _saveProfile() async {
@@ -100,6 +105,7 @@ class _OptimizationPageState extends State<OptimizationPage> {
         'id': user.id,
         'name': _profileNameController.text.trim(),
         'age': age,
+        'role': _profileRole,
       });
       if (mounted) {
         showCupertinoDialog(
@@ -116,6 +122,52 @@ class _OptimizationPageState extends State<OptimizationPage> {
     } finally {
       if (mounted) setState(() => _profileSaving = false);
     }
+  }
+
+  void _changeRole() {
+    int selectedIndex = _allRoles.indexOf(_profileRole);
+    if (selectedIndex < 0) selectedIndex = 0;
+    // Use StatefulBuilder so the picker can update its own state
+    // and we update _profileRole on Done, not on scroll
+    String tempRole = _profileRole.isNotEmpty ? _profileRole : _allRoles[0];
+    showCupertinoModalPopup(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModalState) => Container(
+          height: 250,
+          color: CupertinoColors.systemBackground.resolveFrom(ctx),
+          child: Column(
+            children: [
+              Container(
+                height: 44,
+                color: CupertinoColors.systemGrey5.resolveFrom(ctx),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    CupertinoButton(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: const Text('Done'),
+                      onPressed: () {
+                        setState(() => _profileRole = tempRole);
+                        Navigator.of(ctx).pop();
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: CupertinoPicker(
+                  scrollController: FixedExtentScrollController(initialItem: selectedIndex),
+                  itemExtent: 32,
+                  onSelectedItemChanged: (i) => setModalState(() => tempRole = _allRoles[i]),
+                  children: _allRoles.map((r) => Center(child: Text(r))).toList(),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _loadTags() async {
@@ -306,10 +358,10 @@ class _OptimizationPageState extends State<OptimizationPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Role badge (read-only from signup)
-              if (_profileRole.isNotEmpty) ...[
-                Row(
-                  children: [
+              // Role row
+              Row(
+                children: [
+                  if (_profileRole.isNotEmpty)
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                       decoration: BoxDecoration(
@@ -321,13 +373,23 @@ class _OptimizationPageState extends State<OptimizationPage> {
                         _profileRole,
                         style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: roleColor),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    const Text('Role from sign up', style: TextStyle(fontSize: 12, color: CupertinoColors.inactiveGray)),
-                  ],
-                ),
-                const SizedBox(height: 14),
-              ],
+                    )
+                  else
+                    const Text('No role set', style: TextStyle(fontSize: 13, color: CupertinoColors.inactiveGray)),
+                  const SizedBox(width: 8),
+                  CupertinoButton(
+                    padding: EdgeInsets.zero,
+                    onPressed: _changeRole,
+                    child: const Text('Change', style: TextStyle(fontSize: 13, color: CupertinoColors.activeBlue)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'Role defaults to your sign up selection.',
+                style: TextStyle(fontSize: 11, color: CupertinoColors.inactiveGray),
+              ),
+              const SizedBox(height: 14),
               // Name
               const Text('Name', style: TextStyle(fontSize: 13, color: CupertinoColors.inactiveGray)),
               const SizedBox(height: 4),
@@ -399,6 +461,7 @@ class _OptimizationPageState extends State<OptimizationPage> {
         const SizedBox(height: 8),
         Wrap(
           spacing: 8,
+          runSpacing: 8,
           children: _favoriteItems.map((item) {
             final word = item['word'] ?? '';
             return Container(
@@ -516,9 +579,8 @@ class _OptimizationPageState extends State<OptimizationPage> {
       }).select();
       if (insert.isNotEmpty) {
         final ctxId = insert[0]['id']?.toString() ?? '';
-        final ctx = ContextSentence(id: ctxId, text: text);
         final list = _tagContexts.putIfAbsent(tag, () => <ContextSentence>[]);
-        list.add(ctx);
+        list.add(ContextSentence(id: ctxId, text: text));
       } else {
         _showDialog('Error', 'Insert returned empty result.');
       }

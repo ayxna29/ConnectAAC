@@ -72,6 +72,7 @@ class FlashcardGrid extends StatelessWidget {
     this.onRate,
     this.wordToFitz,
     this.maxCards = 12,
+    this.gridCols,
   });
 
   final List<String>? words;
@@ -85,18 +86,25 @@ class FlashcardGrid extends StatelessWidget {
   final void Function(String word, String? filename)? onRate;
   final Map<String, String>? wordToFitz;
   final int maxCards;
+  final int? gridCols;
 
   static const double _matchThreshold = 0.5;
 
   String? _findBestMatch(String word) {
-    if (preMapped != null && preMapped!.containsKey(word)) return preMapped![word];
+    if (preMapped != null && preMapped!.containsKey(word)) {
+      final f = preMapped![word]!;
+      // Never return blank.svg — treat as no match
+      if (f.toLowerCase() == 'blank.svg') return null;
+      return f;
+    }
     final pool = availableFilenames ?? const <String>[];
     if (pool.isEmpty) return null;
     var bestScore = 0.0;
     String? bestFile;
     final lowerWord = word.toLowerCase();
     for (final file in pool) {
-      final nameOnly = file.toLowerCase().replaceAll(RegExp(r'\.svg$'), '');
+      if (file.toLowerCase() == 'blank.svg') continue;
+      final nameOnly = file.toLowerCase().replaceAll(RegExp(r'\.svg\$'), '');
       final score = StringSimilarity.compareTwoStrings(lowerWord, nameOnly);
       if (score > bestScore) { bestScore = score; bestFile = file; }
     }
@@ -131,41 +139,42 @@ class FlashcardGrid extends StatelessWidget {
       builder: (context, constraints) {
         final totalWidth = constraints.maxWidth;
         final totalHeight = constraints.maxHeight;
+        const double spacing = 10.0;
 
-        int cols = 2;
-        int rows = (visible.length / cols).ceil();
-        for (int c = 2; c <= 10; c++) {
-          final r = (visible.length / c).ceil();
-          final cardW = (totalWidth - (c + 1) * 10) / c;
-          final cardH = (totalHeight - (r + 1) * 10) / r;
-          if (cardW >= 80 && cardH >= 80) {
-            cols = c;
-            rows = r;
+        // Determine column count
+        int cols = gridCols ?? 2;
+        if (gridCols == null) {
+          for (int c = 2; c <= 10; c++) {
+            final r = (visible.length / c).ceil();
+            final cardW = (totalWidth - (c + 1) * spacing) / c;
+            final cardH = (totalHeight - (r + 1) * spacing) / r;
+            if (cardW >= 80 && cardH >= 80) cols = c;
           }
         }
 
-        final cardW = (totalWidth - (cols + 1) * 10) / cols;
-        final cardH = (totalHeight - (rows + 1) * 10) / rows;
-        final cardSize = cardW < cardH ? cardW : cardH;
+        // Always use exact preset rows to fill screen
+        final int rows = (visible.length / cols).ceil().clamp(1, 999);
+        final double cardW = (totalWidth - (cols + 1) * spacing) / cols;
+        final double cardH = (totalHeight - (rows + 1) * spacing) / rows;
+        // Aspect ratio fills the screen exactly for the given cols/rows
+        final double aspectRatio = (cardW / cardH).clamp(0.3, 4.0);
 
-        final iconSize = (cardSize * 0.45).clamp(24.0, 100.0);
-        final fontSize = (cardSize * 0.14).clamp(9.0, 18.0);
-        final borderRadius = (cardSize * 0.1).clamp(6.0, 14.0);
+        final double cardSize = cardW < cardH ? cardW : cardH;
+        final double iconSize = (cardSize * 0.45).clamp(24.0, 100.0);
+        final double fontSize = (cardSize * 0.14).clamp(9.0, 18.0);
+        final double borderRadius = (cardSize * 0.1).clamp(6.0, 14.0);
 
         return GridView.count(
-          physics: const BouncingScrollPhysics(),
-          padding: const EdgeInsets.all(10),
+          physics: const NeverScrollableScrollPhysics(),
+          padding: const EdgeInsets.all(spacing),
           crossAxisCount: cols,
-          crossAxisSpacing: 10,
-          mainAxisSpacing: 10,
-          childAspectRatio: 1.0,
+          crossAxisSpacing: spacing,
+          mainAxisSpacing: spacing,
+          childAspectRatio: aspectRatio,
           children: visible.map((entry) {
             final word = entry.key;
-            final filename = entry.value;
-
-            // Treat blank.svg as no image — show word placeholder instead
-            final isBlank = filename == null || filename.toLowerCase() == 'blank.svg';
-            final assetPath = !isBlank
+            final filename = entry.value; // null means no image — show word placeholder
+            final assetPath = filename != null
                 ? 'assets/mulberry-symbols/EN-symbols/$filename'
                 : null;
 
@@ -260,7 +269,7 @@ class FlashcardGrid extends StatelessWidget {
                             borderRadius: BorderRadius.circular(4),
                           ),
                           child: Text(
-                            fileTags.take(2).map((t) => '#$t').join(' '),
+                            fileTags.take(2).map((t) => '#\$t').join(' '),
                             style: const TextStyle(fontSize: 9, color: Colors.black54),
                           ),
                         ),

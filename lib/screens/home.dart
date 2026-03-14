@@ -27,12 +27,13 @@ class MyHomePage extends StatefulWidget {
   State<MyHomePage> createState() => _MyHomePageState();
 }
 
-class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
+class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   final TextEditingController caregiverInputController = TextEditingController();
   final List<SelectedCard> selected = [];
   late stt.SpeechToText _speech;
   bool _isListening = false;
   late FlutterTts _tts;
+  late AnimationController _shimmerController;
 
   Map<String, String>? _currentVoice;
   double _currentRate = 0.5;
@@ -52,14 +53,15 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   int _genToken = 0;
   int _cardCount = 12;
 
+  static const Map<int, int> _countToCols = {
+    6: 2, 9: 3, 12: 3, 16: 4, 20: 4, 25: 5, 30: 5, 36: 6, 42: 7,
+  };
+  int get _gridCols => _countToCols[_cardCount] ?? 4;
+
   GeneratedFlashcard? _findGeneratedByWord(String word) {
     try {
-      return _generated.firstWhere(
-        (g) => g.answer.toLowerCase() == word.toLowerCase(),
-      );
-    } catch (_) {
-      return null;
-    }
+      return _generated.firstWhere((g) => g.answer.toLowerCase() == word.toLowerCase());
+    } catch (_) { return null; }
   }
 
   Future<void> _loadCardCount() async {
@@ -107,6 +109,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _speech = stt.SpeechToText();
     _tts = FlutterTts();
+    _shimmerController = AnimationController(vsync: this, duration: const Duration(milliseconds: 1200))..repeat();
     _configureTts();
     _loadAssets().then((_) => _initFavorites());
     _loadCardCount();
@@ -115,6 +118,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _shimmerController.dispose();
     super.dispose();
   }
 
@@ -129,46 +133,31 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
       if (kIsWeb) {
         try {
           final available = await _speech.initialize();
-          print('Speech initialized on resume (web): available=$available, hasPermission=${_speech.hasPermission}');
           if (mounted) setState(() {});
-        } catch (e) { print('Speech init error on resume (web): $e'); }
+        } catch (e) {}
         return;
       }
       final status = await Permission.microphone.status;
-      print('Permission on resume: $status');
       if (status.isGranted) {
         try {
-          final available = await _speech.initialize();
-          print('Speech initialized on resume: available=$available, hasPermission=${_speech.hasPermission}');
+          await _speech.initialize();
           if (mounted) setState(() {});
-        } catch (e) { print('Speech init error on resume: $e'); }
+        } catch (e) {}
       }
-    } catch (e) { print('Error checking permission on resume: $e'); }
+    } catch (e) {}
   }
 
   Future<void> _refreshMicStatus() async {
     try {
       if (kIsWeb) {
         try {
-          final available = await _speech.initialize();
-          final hasPermission = _speech.hasPermission == true;
-          print('Microphone status refresh (web): hasPerm:${hasPermission ? 'yes' : 'no'}, initialized:${available ? 'yes' : 'no'}');
+          await _speech.initialize();
           if (mounted) setState(() {});
-        } catch (e) {
-          print('Failed to refresh mic status (web): $e');
-          if (mounted) setState(() {});
-        }
+        } catch (e) { if (mounted) setState(() {}); }
         return;
       }
-      final status = await Permission.microphone.status;
-      final hasPermission = _speech.hasPermission == true;
-      final initialized = _speech.isAvailable;
-      print('Microphone status refresh: ${status.toString().split('.').last}, hasPerm:${hasPermission ? 'yes' : 'no'}, initialized:${initialized ? 'yes' : 'no'}');
       if (mounted) setState(() {});
-    } catch (e) {
-      print('Failed to refresh mic status: $e');
-      if (mounted) setState(() {});
-    }
+    } catch (e) { if (mounted) setState(() {}); }
   }
 
   Future<void> _configureTts() async {
@@ -178,7 +167,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
       await _tts.setVolume(_currentVolume);
       await _tts.setPitch(1.0);
       try { await _tts.awaitSpeakCompletion(true); } catch (_) {}
-    } catch (e) { print('TTS init error: $e'); }
+    } catch (e) {}
   }
 
   Future<void> _loadAssets() async {
@@ -206,43 +195,27 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
         for (final f in favs) {
           _favoriteIds.add(f.id);
           _favoriteCards.add(GeneratedFlashcard(
-            id: f.id,
-            question: f.question,
-            answer: f.answer,
-            tags: const [],
-            assetFilename: _normalizeAssetFilename(f.assetFilename),
+            id: f.id, question: f.question, answer: f.answer,
+            tags: const [], assetFilename: _normalizeAssetFilename(f.assetFilename),
           ));
         }
       });
-    } catch (e) { print('Failed to load favorites: $e'); }
+    } catch (e) {}
   }
 
   Future<void> _toggleFavorite(GeneratedFlashcard card) async {
     final wasFav = _favoriteIds.contains(card.id);
     setState(() {
-      if (wasFav) {
-        _favoriteIds.remove(card.id);
-        _favoriteCards.removeWhere((c) => c.id == card.id);
-      } else {
-        _favoriteIds.add(card.id);
-        _favoriteCards.add(card);
-      }
+      if (wasFav) { _favoriteIds.remove(card.id); _favoriteCards.removeWhere((c) => c.id == card.id); }
+      else { _favoriteIds.add(card.id); _favoriteCards.add(card); }
     });
     try {
-      if (wasFav) {
-        await _flashcardService.unfavoriteCard(card.id);
-      } else {
-        await _flashcardService.favoriteCard(card.id);
-      }
+      if (wasFav) await _flashcardService.unfavoriteCard(card.id);
+      else await _flashcardService.favoriteCard(card.id);
     } catch (e) {
       setState(() {
-        if (wasFav) {
-          _favoriteIds.add(card.id);
-          _favoriteCards.add(card);
-        } else {
-          _favoriteIds.remove(card.id);
-          _favoriteCards.removeWhere((c) => c.id == card.id);
-        }
+        if (wasFav) { _favoriteIds.add(card.id); _favoriteCards.add(card); }
+        else { _favoriteIds.remove(card.id); _favoriteCards.removeWhere((c) => c.id == card.id); }
       });
       if (mounted) {
         showCupertinoDialog(
@@ -263,19 +236,16 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     setState(() { _loadingGeneration = true; _generated = []; _preMapped = {}; });
     try {
       final token = ++_genToken;
-      print('🚀 Generating cards with token=$token for input: "$input"');
       final cards = await _flashcardService.generate(caregiverInput: input);
-      print('✅ Got ${cards.length} cards (token=$token vs current=$_genToken)');
-      if (token != _genToken) { print('⚠️ Token mismatch, discarding results'); return; }
+      if (token != _genToken) return;
 
       final mapping = <String, String>{};
       for (final c in cards) {
         if (c.assetFilename != null) {
           final af = _normalizeAssetFilename(c.assetFilename);
           if (af == null) continue;
-          if (_availableFilenames.contains(af)) {
-            mapping[c.answer] = af;
-          } else {
+          if (_availableFilenames.contains(af)) { mapping[c.answer] = af; }
+          else {
             final base = af.replaceAll(RegExp(r'\.svg$', caseSensitive: false), '');
             try {
               final resolved = await AssetService.instance.lookup(base);
@@ -288,9 +258,8 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
         if (c.assetFilename != null) {
           final af = _normalizeAssetFilename(c.assetFilename);
           if (af == null) continue;
-          if (_availableFilenames.contains(af)) {
-            mapping[c.answer] = af;
-          } else {
+          if (_availableFilenames.contains(af)) { mapping[c.answer] = af; }
+          else {
             final base = af.replaceAll(RegExp(r'\.svg$', caseSensitive: false), '');
             try {
               final resolved = await AssetService.instance.lookup(base);
@@ -351,9 +320,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
       final rateRaw = result['rate'];
       final volumeRaw = result['volume'];
       Map<String, String>? voice;
-      if (voiceRaw is Map) {
-        voice = voiceRaw.map((k, v) => MapEntry(k.toString(), v?.toString() ?? ''));
-      }
+      if (voiceRaw is Map) voice = voiceRaw.map((k, v) => MapEntry(k.toString(), v?.toString() ?? ''));
       final rate = (rateRaw is double) ? rateRaw : _currentRate;
       final volume = (volumeRaw is double) ? volumeRaw : _currentVolume;
       final cardCountRaw = result['cardCount'];
@@ -363,32 +330,8 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
         await _tts.setSpeechRate(_currentRate);
         await _tts.setVolume(_currentVolume);
         if (_currentVoice != null) await _tts.setVoice(_currentVoice!);
-      } catch (e) {
-        print('Failed to apply TTS settings: $e');
-        if (mounted) {
-          showCupertinoDialog(
-            context: context,
-            builder: (_) => CupertinoAlertDialog(
-              title: const Text('TTS Error'),
-              content: Text('Failed to apply voice settings: $e'),
-              actions: [CupertinoDialogAction(child: const Text('OK'), onPressed: () => Navigator.of(context).pop())],
-            ),
-          );
-        }
-      }
-    } catch (e) {
-      print('Error opening settings: $e');
-      if (mounted) {
-        showCupertinoDialog(
-          context: context,
-          builder: (_) => CupertinoAlertDialog(
-            title: const Text('Error'),
-            content: Text('Could not open settings: $e'),
-            actions: [CupertinoDialogAction(child: const Text('OK'), onPressed: () => Navigator.of(context).pop())],
-          ),
-        );
-      }
-    }
+      } catch (e) {}
+    } catch (e) {}
   }
 
   Future<void> _openAiOptimization() async {
@@ -422,69 +365,57 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
       if (mounted) setState(() => _isListening = false);
       return;
     }
-    try {
-      if (kIsWeb) {
-        final granted = await mic_perm.requestBrowserMic();
-        if (!granted) {
-          if (mounted) {
-            showCupertinoDialog(
-              context: context,
-              builder: (_) => CupertinoAlertDialog(
-                title: const Text('Microphone Permission'),
-                content: const Text('Please allow microphone access in your browser.'),
-                actions: [CupertinoDialogAction(child: const Text('OK'), onPressed: () => Navigator.of(context).pop())],
-              ),
-            );
-          }
-          return;
-        }
-        bool available = false;
-        try {
-          available = await _speech.initialize(
-            onStatus: (val) {
-              if (mounted) setState(() => _isListening = val == 'listening');
-              if (val == 'done' || val == 'notListening') {
-                if (mounted) setState(() => _isListening = false);
-                final text = caregiverInputController.text.trim();
-                if (text.length >= 3) _generateFromInput();
-              }
-            },
-            onError: (val) {
+
+    // ── Web: call speech.initialize() directly — triggers getUserMedia on mobile browsers ──
+    if (kIsWeb) {
+      bool available = false;
+      try {
+        available = await _speech.initialize(
+          onStatus: (val) {
+            if (mounted) setState(() => _isListening = val == 'listening');
+            if (val == 'done' || val == 'notListening') {
               if (mounted) setState(() => _isListening = false);
-              print('Speech onError (web): $val');
-            },
+              final text = caregiverInputController.text.trim();
+              if (text.length >= 3) _generateFromInput();
+            }
+          },
+          onError: (val) {
+            if (mounted) setState(() => _isListening = false);
+          },
+        );
+      } catch (e) {}
+      if (!available) {
+        if (mounted) {
+          showCupertinoDialog(
+            context: context,
+            builder: (_) => CupertinoAlertDialog(
+              title: const Text('Microphone Error'),
+              content: const Text('Could not access microphone. Please allow microphone access in your browser settings.'),
+              actions: [CupertinoDialogAction(child: const Text('OK'), onPressed: () => Navigator.of(context).pop())],
+            ),
           );
-        } catch (e) { print('Speech initialize error on web after grant: $e'); }
-        if (!available) {
-          if (mounted) {
-            showCupertinoDialog(
-              context: context,
-              builder: (_) => CupertinoAlertDialog(
-                title: const Text('Microphone Error'),
-                content: const Text('Could not initialize speech recognition in the browser.'),
-                actions: [CupertinoDialogAction(child: const Text('OK'), onPressed: () => Navigator.of(context).pop())],
-              ),
-            );
-          }
-          return;
-        }
-        if (mounted) setState(() => _isListening = true);
-        try {
-          _speech.listen(
-            onResult: (val) {
-              if (!mounted) return;
-              caregiverInputController.text = val.recognizedWords;
-              caregiverInputController.selection = TextSelection.fromPosition(TextPosition(offset: caregiverInputController.text.length));
-            },
-            cancelOnError: true,
-          );
-        } catch (err) {
-          if (mounted) setState(() => _isListening = false);
-          print('Speech listen error (web): $err');
         }
         return;
       }
+      if (mounted) setState(() => _isListening = true);
+      try {
+        _speech.listen(
+          onResult: (val) {
+            if (!mounted) return;
+            caregiverInputController.text = val.recognizedWords;
+            caregiverInputController.selection = TextSelection.fromPosition(
+              TextPosition(offset: caregiverInputController.text.length));
+          },
+          cancelOnError: true,
+        );
+      } catch (err) {
+        if (mounted) setState(() => _isListening = false);
+      }
+      return;
+    }
 
+    // ── Native (iOS/Android) ──
+    try {
       await _refreshMicStatus();
       var status = await Permission.microphone.status;
       if (!status.isGranted) status = await Permission.microphone.request();
@@ -494,7 +425,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
             context: context,
             builder: (_) => CupertinoAlertDialog(
               title: const Text('Microphone Permission'),
-              content: const Text('Microphone access is required. Please enable it in app settings.'),
+              content: const Text('Please enable microphone access in app settings.'),
               actions: [
                 CupertinoDialogAction(child: const Text('Open Settings'), onPressed: () { openAppSettings(); Navigator.of(context).pop(); }),
                 CupertinoDialogAction(child: const Text('Cancel'), onPressed: () => Navigator.of(context).pop()),
@@ -517,92 +448,25 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                   if (text.length >= 3) _generateFromInput();
                 }
               },
-              onError: (val) {
-                if (mounted) setState(() => _isListening = false);
-                print('Speech onError: $val');
-              },
+              onError: (val) { if (mounted) setState(() => _isListening = false); },
             );
-          } catch (e) { print('Speech initialize error after grant: $e'); }
+          } catch (e) {}
         }
-        if (!available) {
-          if (mounted) {
-            showCupertinoDialog(
-              context: context,
-              builder: (_) => CupertinoAlertDialog(
-                title: const Text('Microphone Error'),
-                content: const Text('Could not initialize speech recognition. Try restarting the app or checking OS settings.'),
-                actions: [CupertinoDialogAction(child: const Text('OK'), onPressed: () => Navigator.of(context).pop())],
-              ),
-            );
-          }
-          if (mounted) setState(() => _isListening = false);
-          return;
-        }
+        if (!available) { if (mounted) setState(() => _isListening = false); return; }
         if (mounted) setState(() => _isListening = true);
         try {
           _speech.listen(
             onResult: (val) {
               if (!mounted) return;
               caregiverInputController.text = val.recognizedWords;
-              caregiverInputController.selection = TextSelection.fromPosition(TextPosition(offset: caregiverInputController.text.length));
+              caregiverInputController.selection = TextSelection.fromPosition(
+                TextPosition(offset: caregiverInputController.text.length));
             },
             cancelOnError: true,
           );
-        } catch (err) {
-          if (mounted) setState(() => _isListening = false);
-          print('Speech listen error: $err');
-        }
-        return;
+        } catch (err) { if (mounted) setState(() => _isListening = false); }
       }
-    } catch (e) {
-      print('Permission check error: $e');
-      bool available = _speech.isAvailable;
-      if (!available) {
-        try {
-          available = await _speech.initialize(
-            onStatus: (val) {
-              if (mounted) setState(() => _isListening = val == 'listening');
-              if (val == 'done' || val == 'notListening') {
-                if (mounted) setState(() => _isListening = false);
-                final text = caregiverInputController.text.trim();
-                if (text.length >= 3) _generateFromInput();
-              }
-            },
-            onError: (val) {
-              if (mounted) setState(() => _isListening = false);
-              print('Speech fallback onError: $val');
-            },
-          );
-        } catch (initErr) { print('Fallback initialization error: $initErr'); }
-      }
-      if (!available || _speech.hasPermission != true) {
-        if (mounted) {
-          showCupertinoDialog(
-            context: context,
-            builder: (_) => CupertinoAlertDialog(
-              title: const Text('Microphone Permission'),
-              content: const Text('Microphone access is required.'),
-              actions: [CupertinoDialogAction(child: const Text('OK'), onPressed: () => Navigator.of(context).pop())],
-            ),
-          );
-        }
-        return;
-      }
-      if (mounted) setState(() => _isListening = true);
-      try {
-        _speech.listen(
-          onResult: (val) {
-            if (!mounted) return;
-            caregiverInputController.text = val.recognizedWords;
-            caregiverInputController.selection = TextSelection.fromPosition(TextPosition(offset: caregiverInputController.text.length));
-          },
-          cancelOnError: true,
-        );
-      } catch (err) {
-        if (mounted) setState(() => _isListening = false);
-        print('Speech listen error (fallback): $err');
-      }
-    }
+    } catch (e) { if (mounted) setState(() => _isListening = false); }
   }
 
   Future<void> _speakNow(String text) async {
@@ -613,7 +477,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
       await _tts.setVolume(_currentVolume);
       if (_currentVoice != null) { try { await _tts.setVoice(_currentVoice!); } catch (_) {} }
       await _tts.speak(text);
-    } catch (e) { print('TTS speakNow error: $e'); }
+    } catch (e) {}
   }
 
   Future<void> _speakAll() async {
@@ -623,11 +487,21 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   }
 
   Future<void> _onFlashcardTap(String word) async {
-    final card = [..._favoriteCards, ..._generated].firstWhere(
-      (c) => c.answer == word,
-      orElse: () => GeneratedFlashcard(id: '', question: '', answer: word, tags: [], assetFilename: null),
-    );
-    final filename = card.assetFilename ?? _findBestFilename(word);
+    final premappedFilename = _preMapped[word];
+    String? filename;
+    if (premappedFilename != null) {
+      final norm = _normalizeAssetFilename(premappedFilename);
+      filename = (norm != null && norm.toLowerCase() != 'blank.svg') ? norm : null;
+    } else {
+      final card = [..._favoriteCards, ..._generated].firstWhere(
+        (c) => c.answer == word,
+        orElse: () => GeneratedFlashcard(id: '', question: '', answer: word, tags: [], assetFilename: null),
+      );
+      final normCard = _normalizeAssetFilename(card.assetFilename);
+      filename = (normCard != null && normCard.toLowerCase() != 'blank.svg')
+          ? normCard
+          : _findBestFilename(word);
+    }
     setState(() { selected.add(SelectedCard(word, filename)); });
     _speakNow(word);
   }
@@ -647,8 +521,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     final generatedAnswers = _generated.map((c) => c.answer.toLowerCase()).toSet();
     final favWords = _favoriteCards
         .where((c) => !generatedAnswers.contains(c.answer.toLowerCase()))
-        .map((c) => c.answer)
-        .toList();
+        .map((c) => c.answer).toList();
     return [...favWords, ..._generated.map((g) => g.answer)];
   }
 
@@ -661,17 +534,16 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
 
   Widget _buildOutputItems() {
     if (selected.isEmpty) {
-      return const Text(
-        'Output will appear here...',
-        style: TextStyle(fontSize: 16, color: CupertinoColors.inactiveGray),
-      );
+      return const Text('Output will appear here...',
+          style: TextStyle(fontSize: 16, color: CupertinoColors.inactiveGray));
     }
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Row(
         children: selected.map((s) {
           final filename = _normalizeAssetFilename(s.assetFilename);
-          final assetPath = filename != null ? 'assets/mulberry-symbols/EN-symbols/$filename' : null;
+          final isBlank = filename == null || filename.toLowerCase() == 'blank.svg';
+          final assetPath = !isBlank ? 'assets/mulberry-symbols/EN-symbols/$filename' : null;
           return Container(
             width: 140,
             margin: const EdgeInsets.only(right: 8),
@@ -684,10 +556,15 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                   height: 72,
                   child: assetPath != null
                       ? SvgPicture.asset(assetPath, fit: BoxFit.contain)
-                      : const Icon(Icons.help_outline, size: 48, color: Colors.black26),
+                      : Container(
+                          decoration: BoxDecoration(color: Colors.grey.shade200, borderRadius: BorderRadius.circular(6)),
+                          child: Center(child: Text(s.word, textAlign: TextAlign.center,
+                              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.black54))),
+                        ),
                 ),
                 const SizedBox(height: 6),
-                Text(s.word, textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                Text(s.word, textAlign: TextAlign.center,
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
               ],
             ),
           );
@@ -696,13 +573,54 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     );
   }
 
+  // Shimmer placeholder card shown while loading
+  Widget _buildShimmerCard() {
+    return AnimatedBuilder(
+      animation: _shimmerController,
+      builder: (context, child) {
+        final shimmerValue = _shimmerController.value;
+        final color = Color.lerp(
+          const Color(0xFFE8E8E8),
+          const Color(0xFFF8F8F8),
+          (shimmerValue * 2).clamp(0.0, 1.0),
+        )!;
+        return Container(
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFFE0E0E0), width: 2),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                margin: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Color.lerp(const Color(0xFFDDDDDD), const Color(0xFFEEEEEE), shimmerValue)!,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              Container(
+                height: 10,
+                width: 50,
+                margin: const EdgeInsets.only(bottom: 8),
+                decoration: BoxDecoration(
+                  color: Color.lerp(const Color(0xFFDDDDDD), const Color(0xFFEEEEEE), shimmerValue)!,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   Map<String, String> _buildWordToFitz() {
     final allCards = [..._favoriteCards, ..._generated];
     final map = <String, String>{};
     for (final card in allCards) {
-      if (card.fitz != null && card.fitz!.isNotEmpty) {
-        map[card.answer] = card.fitz!;
-      }
+      if (card.fitz != null && card.fitz!.isNotEmpty) map[card.answer] = card.fitz!;
     }
     return map;
   }
@@ -715,17 +633,10 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
           padding: const EdgeInsets.only(left: 8.0),
           child: RichText(
             text: const TextSpan(
-              style: TextStyle(
-                fontSize: 28.0,
-                fontWeight: FontWeight.bold,
-                color: Colors.black,
-              ),
+              style: TextStyle(fontSize: 28.0, fontWeight: FontWeight.bold, color: Colors.black),
               children: [
                 TextSpan(text: 'Connect'),
-                TextSpan(
-                  text: 'AAC',
-                  style: TextStyle(color: Color(0xFF64B5F6)),
-                ),
+                TextSpan(text: 'AAC', style: TextStyle(color: Color(0xFF64B5F6))),
               ],
             ),
           ),
@@ -737,10 +648,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
               padding: EdgeInsets.zero,
               onPressed: _openSettings,
               child: Container(
-                decoration: const BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: Color(0xFFF0F0F0),
-                ),
+                decoration: const BoxDecoration(shape: BoxShape.circle, color: Color(0xFFF0F0F0)),
                 padding: const EdgeInsets.all(8),
                 child: const Icon(CupertinoIcons.settings, size: 24, color: Color(0xFF888888)),
               ),
@@ -750,10 +658,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
               padding: EdgeInsets.zero,
               onPressed: _openAiOptimization,
               child: Container(
-                decoration: const BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: Color(0xFF64B5F6),
-                ),
+                decoration: const BoxDecoration(shape: BoxShape.circle, color: Color(0xFF64B5F6)),
                 padding: const EdgeInsets.all(8),
                 child: const Icon(CupertinoIcons.sparkles, size: 24, color: CupertinoColors.white),
               ),
@@ -808,32 +713,20 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
               child: Container(
-                decoration: BoxDecoration(
-                  color: CupertinoColors.systemGrey6,
-                  borderRadius: BorderRadius.circular(24),
-                ),
+                decoration: BoxDecoration(color: CupertinoColors.systemGrey6, borderRadius: BorderRadius.circular(24)),
                 padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
                 child: Row(
                   children: [
                     Expanded(child: _buildOutputItems()),
                     const SizedBox(width: 8),
-                    CupertinoButton(
-                      padding: EdgeInsets.all(0),
-                      onPressed: _onBackspace,
-                      child: const Icon(CupertinoIcons.delete_left, color: CupertinoColors.systemGrey),
-                    ),
+                    CupertinoButton(padding: EdgeInsets.all(0), onPressed: _onBackspace,
+                        child: const Icon(CupertinoIcons.delete_left, color: CupertinoColors.systemGrey)),
                     const SizedBox(width: 8),
-                    CupertinoButton(
-                      padding: EdgeInsets.all(0),
-                      onPressed: _onClear,
-                      child: const Icon(CupertinoIcons.clear_thick_circled, size: 26, color: CupertinoColors.destructiveRed),
-                    ),
+                    CupertinoButton(padding: EdgeInsets.all(0), onPressed: _onClear,
+                        child: const Icon(CupertinoIcons.clear_thick_circled, size: 26, color: CupertinoColors.destructiveRed)),
                     const SizedBox(width: 8),
-                    CupertinoButton(
-                      padding: EdgeInsets.all(0),
-                      onPressed: _speakAll,
-                      child: const Icon(CupertinoIcons.speaker_2, size: 26, color: CupertinoColors.activeBlue),
-                    ),
+                    CupertinoButton(padding: EdgeInsets.all(0), onPressed: _speakAll,
+                        child: const Icon(CupertinoIcons.speaker_2, size: 26, color: CupertinoColors.activeBlue)),
                   ],
                 ),
               ),
@@ -841,22 +734,42 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8),
-                child: FlashcardGrid(
-                  onCardTap: _onFlashcardTap,
-                  onToggleFavorite: _onToggleFavorite,
-                  favorites: _favoriteIds,
-                  tags: _tags,
-                  words: _getSortedWords(),
-                  preMapped: _preMapped,
-                  availableFilenames: _availableFilenames,
-                  wordToCardId: {
-                    for (final card in [..._favoriteCards, ..._generated])
-                      card.answer: card.id,
-                  },
-                  onRate: _rateWord,
-                  wordToFitz: _buildWordToFitz(),
-                  maxCards: _cardCount,
-                ),
+                child: _loadingGeneration
+                    ? LayoutBuilder(
+                        builder: (context, constraints) {
+                          final cols = _gridCols;
+                          final rows = (_cardCount / cols).ceil();
+                          return GridView.count(
+                            physics: const NeverScrollableScrollPhysics(),
+                            crossAxisCount: cols,
+                            crossAxisSpacing: 10,
+                            mainAxisSpacing: 10,
+                            padding: const EdgeInsets.all(10),
+                            childAspectRatio: 1.0,
+                            children: List.generate(
+                              (cols * rows).clamp(0, _cardCount),
+                              (_) => _buildShimmerCard(),
+                            ),
+                          );
+                        },
+                      )
+                    : FlashcardGrid(
+                        onCardTap: _onFlashcardTap,
+                        onToggleFavorite: _onToggleFavorite,
+                        favorites: _favoriteIds,
+                        tags: _tags,
+                        words: _getSortedWords(),
+                        preMapped: _preMapped,
+                        availableFilenames: _availableFilenames,
+                        wordToCardId: {
+                          for (final card in [..._favoriteCards, ..._generated])
+                            card.answer: card.id,
+                        },
+                        onRate: _rateWord,
+                        wordToFitz: _buildWordToFitz(),
+                        maxCards: _cardCount,
+                        gridCols: _gridCols,
+                      ),
               ),
             ),
           ],
